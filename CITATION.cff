@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "LLM Efficiency Frontier — reproducible analysis"
+message: "If you use this software or data, please cite it."
+authors:
+  - family-names: "Cristian"
+    affiliation: "Federal University of Santa Maria (UFSM), PPGEP"
+keywords:
+  - large language models
+  - scaling laws
+  - production engineering
+  - sustainable computing
+  - efficiency frontier
+license: MIT
+references:
+  - type: article
+    authors: [{family-names: Hoffmann, given-names: J.}]
+    title: "Training compute-optimal large language models"
+    year: 2022
+    notes: "arXiv:2203.15556"
+  - type: article
+    authors: [{family-names: Besiroglu, given-names: T.}]
+    title: "Chinchilla Scaling: A replication attempt"
+    year: 2024
+    notes: "arXiv:2404.10102"
+  - type: article
+    authors: [{family-names: Kaplan, given-names: J.}]
+    title: "Scaling laws for neural language models"
+    year: 2020
+    notes: "arXiv:2001.08361"
