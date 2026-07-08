@@ -1,8 +1,15 @@
 cff-version: 1.2.0
 title: "LLM Efficiency Frontier — reproducible analysis"
 message: "If you use this software or data, please cite it."
+type: software
+repository-code: "https://github.com/gthubinaction/llm-efficiency-frontier"
+version: "2.0.0"
+date-released: "2026-07-08"
+license: MIT
 authors:
-  - family-names: "Cristian"
+  # TODO: preencher nomes completos (given-names + family-names) dos autores
+  - given-names: "Cristian"
+    family-names: "SILVA"
     affiliation: "Federal University of Santa Maria (UFSM), PPGEP"
 keywords:
   - large language models
@@ -10,7 +17,6 @@ keywords:
   - production engineering
   - sustainable computing
   - efficiency frontier
-license: MIT
 references:
   - type: article
     authors: [{family-names: Hoffmann, given-names: J.}]

@@ -14,17 +14,18 @@ The empirical engine is the established power-law scaling of validation loss.
 The contribution is the **decision framework layered on top of it**: an economic
 hurdle-rate criterion and a carbon-intensity term that together answer a
 question scaling laws alone do not — *when to stop scaling* — and translate it
-into an operational threshold (Kaizen vs. Kaikaku, multi-criteria utility).
+into an operational threshold.
 
-The reciprocal-logarithmic saturation form is included as a **theoretically
-motivated, conservative bound** grounded in thermodynamic/material limits, **not**
-as a superior empirical fit. Over the observed range it is not claimed to
-outperform the power law (see "Honest summary" below).
+The reciprocal-logarithmic saturation form L(N) = c/ln(aN+b) + E is included as
+a **theoretically motivated, conservative bound** grounded in thermodynamic and
+material limits, **not** as a superior empirical fit (see "Honest summary").
 
 ## Data provenance
 Reconstructed Hoffmann et al. (2022) points from **Besiroglu et al. (2024)**,
 Epoch AI repo `epoch-research/analyzing-chinchilla`. See `data/README_data.md`.
-245 points, N ∈ [5.7e7, 1.6e10], single tokenizer/dataset (consistent loss scale).
+245 points, N ∈ [5.7e7, 1.6e10], single tokenizer/dataset (consistent loss
+scale). `data/llm_scaling_frontier.csv` holds the 15-point **empirical**
+compute-optimal envelope used for the non-circular model comparison.
 
 ## Reproduce
 ```bash
@@ -33,28 +34,68 @@ PYTHONPATH=. python src/analysis.py
 ```
 Outputs: `results/results.json`, `results/table1_corrected.csv`,
 `figures/fig1..fig4`. The notebook `notebooks/analysis.ipynb` mirrors the
-pipeline with narrative.
+pipeline with narrative. Monte Carlo is seeded (`rng(7)`); results are
+bit-reproducible for fixed library versions.
 
 ## What the pipeline does
 1. Fits the full Chinchilla law L(N,D)=E+A/N^a+B/D^b (Huber, log-domain) to the
-   245 real points — addresses the (N, D, C) critique with real data.
-2. Derives the true compute-optimal frontier N*(C)=argmin_N L(N, C/6N).
+   245 real points — the analysis uses the joint (N, D, C) space.
+2. Derives the compute-optimal frontier N*(C)=argmin_N L(N, C/6N).
 3. Computes marginal loss reduction per compute doubling and the efficiency
-   threshold as a function of the economic hurdle rate (2–8%).
-4. Fits the reciprocal-log and power-law forms to the frontier and compares
-   them honestly (R², MAPE, AIC, BIC).
-5. Runs a real Monte Carlo robustness test (±2% loss noise, refit, threshold).
+   threshold as a function of the economic hurdle rate (2–8%), flagging each
+   threshold as **interpolated or extrapolated** relative to the observed N
+   range.
+4. Compares the reciprocal-log and power-law forms **two ways**:
+   (a) on the model-derived frontier (labelled as circular for the power law —
+   the frontier of a power law is a power law by construction), and
+   (b) on the 15 **empirical** envelope points, with leave-one-out
+   cross-validation — the non-circular test.
+5. Runs a seeded Monte Carlo robustness test (±2% loss noise, 800 refits) and
+   quantifies the deterministic-vs-median gap.
 
 ## Honest summary of findings
 - The efficiency threshold sits at the order of 1e9 (≈2.7e9 at a 4% hurdle),
-  **inside** the observed range — interpolation, not extrapolation.
-- The dominant source of threshold uncertainty is the **hurdle rate**, not data
-  noise: the Monte Carlo CI is tight (~1.9e9–3.0e9), while the hurdle band spans
-  ~2e8–8e9.
-- Over the observed ~2.5 orders of magnitude in N, the reciprocal-log form is
-  **not** empirically superior to the power law and is weakly identified on this
-  range. Its role is theoretical (bounded saturation under thermodynamic limits).
-  No claim of statistical superiority is made.
+  **inside** the observed range — interpolation, not extrapolation. At a 2%
+  hurdle the threshold (~2.5e10) exits the observed range and is reported as
+  an **extrapolation**.
+- The dominant source of threshold uncertainty is the **hurdle rate**, not
+  data noise: the 4%-hurdle Monte Carlo CI is tight (~1.9e9–3.0e9), while the
+  hurdle band 2–8% spans ~1.9e8 to ~2.5e10.
+- The MC median (10^9.37) sits ~0.05 dex below the deterministic threshold
+  (10^9.43): the threshold is a nonlinear functional of the refitted law, so
+  symmetric noise yields a slightly downshifted distribution. Both values are
+  reported.
+- On the **empirical** 15-point envelope, the power law and the reciprocal-log
+  form are statistically indistinguishable (ΔAIC ≈ 6 mildly favouring the
+  power law; LOOCV RMSE ≈ 0.072 vs 0.070 — effectively tied). Over ~2.5 orders
+  of magnitude, saturation vs. power-law behaviour **cannot be distinguished**,
+  and the inner parameter b of the log form is unidentifiable (SE ≫ |b|). No
+  claim of statistical superiority is made in either direction; the log form's
+  role is theoretical (bounded saturation under thermodynamic limits).
+
+## Figure map (repo → manuscript)
+| repo file | manuscript |
+|---|---|
+| `fig1_fit.png` | Figure 1 |
+| `fig4_hurdle_sensitivity.png` | Figure 2 |
+| `fig3_montecarlo.png` | Figure 3 |
+| `fig2_marginal_gain.png` | supplementary (not in main text) |
+
+## Changelog
+**v2.0.0 (2026-07-08)**
+- **Fixed** an interpolation-clamping bug in the marginal-gain curve: for
+  N > Nf.max/2, `np.interp` silently clamped L*(2N) to the last frontier value,
+  inflating apparent gain decay. Corrected values: gain at N=1e10 is ≈2.7%
+  (was reported 0.9%); the 2% threshold is ≈2.5e10, outside the observed range
+  (was reported 7.8e9). Thresholds at 4–8% change by <2%.
+- Logarithmic form implemented exactly as in the manuscript (c/ln(aN+b)+E),
+  with parameter standard errors; the previous bounded 3-parameter variant
+  produced a degenerate boundary solution (R²≈0.77 was an artifact of the
+  bounds, not a property of the form).
+- Added non-circular model comparison + LOOCV on the 15 empirical envelope
+  points.
+- Monte Carlo deterministic-vs-median gap quantified and explained.
+- Requirements pinned; CITATION.cff completed; interpolation in log10(N).
 
 ## Citation
 See `CITATION.cff`. Please also cite Hoffmann et al. (2022), Besiroglu et al.
