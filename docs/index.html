@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Efficiency Frontier — decision instrument (v2.0.0)</title>
+<style>
+:root{
+  --ink:#1f3b73;        /* frontier blue — same as manuscript figures */
+  --signal:#c0392b;     /* threshold red — same as manuscript figures */
+  --ok:#1e6f45;         /* interpolated stamp */
+  --warn:#a8690a;       /* extrapolated stamp */
+  --paper:#f4f6f9;
+  --panel:#ffffff;
+  --grid:#dfe4ec;
+  --mut:#5b6472;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,Menlo,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--paper);color:#1c2330;font-family:var(--sans);font-size:15px;line-height:1.45}
+a{color:var(--ink)}
+header{background:var(--ink);color:#fff;padding:14px 22px;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline}
+header h1{font-size:17px;font-weight:650;letter-spacing:.01em}
+header .ver{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.14);padding:2px 8px;border-radius:3px}
+header .sub{font-size:12.5px;opacity:.8;flex-basis:100%}
+main{max-width:1060px;margin:0 auto;padding:18px 18px 40px;display:grid;grid-template-columns:250px 1fr;gap:18px}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+
+/* control rail */
+.rail{display:flex;flex-direction:column;gap:14px}
+.ctl{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:12px 14px}
+.ctl label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:6px}
+.ctl .val{font-family:var(--mono);font-size:14px;color:var(--ink);font-weight:600}
+.ctl .axis{font-size:11px;color:var(--mut);margin-top:4px}
+input[type=range]{width:100%;accent-color:var(--ink);margin-top:6px}
+select{width:100%;font:inherit;font-family:var(--mono);font-size:13px;padding:5px 6px;border:1px solid var(--grid);border-radius:4px;background:#fff;margin-top:6px}
+.ctl.h .axis b{color:var(--signal)}
+input:focus-visible,select:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+
+/* readout — the signature */
+.readout{background:var(--panel);border:1px solid var(--grid);border-left:5px solid var(--signal);border-radius:6px;padding:14px 18px;display:flex;flex-wrap:wrap;gap:8px 26px;align-items:center}
+.readout .big{font-family:var(--mono);font-size:30px;font-weight:700;color:var(--signal);letter-spacing:-.01em}
+.readout .lbl{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.stamp{font-family:var(--mono);font-size:11.5px;font-weight:700;letter-spacing:.06em;padding:4px 10px;border-radius:3px;border:1.6px solid}
+.stamp.ok{color:var(--ok);border-color:var(--ok);background:#eef7f1}
+.stamp.warn{color:var(--warn);border-color:var(--warn);background:#fbf3e4}
+.readout .note{font-size:12px;color:var(--mut);flex-basis:100%}
+
+.panel{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:14px 16px 8px;margin-top:16px}
+.panel h2{font-size:13.5px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.panel .cap{font-size:12px;color:var(--mut);margin-bottom:6px}
+svg{width:100%;height:auto;display:block}
+.ax{font-family:var(--mono);font-size:10px;fill:var(--mut)}
+.axl{font-family:var(--sans);font-size:11px;fill:var(--mut)}
+
+/* three-gap strip */
+.gaps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+@media(max-width:820px){.gaps{grid-template-columns:1fr}}
+.gap{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:11px 13px}
+.gap .f{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--ink)}
+.gap .n{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);margin:2px 0 5px}
+.gap p{font-size:12px;color:#38404e}
+
+footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:12px;color:var(--mut)}
+footer p{margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>LLM Efficiency Frontier — decision instrument</h1>
+  <span class="ver">pipeline v2.0.0</span>
+  <span class="sub">When does the next compute doubling stop paying? Drag the hurdle rate; hardware and grid set how much each doubling costs the atmosphere.</span>
+</header>
+
+<main>
+  <aside class="rail">
+    <div class="ctl h">
+      <label for="hurdle">Economic hurdle rate</label>
+      <span class="val" id="hurdleV">4.0%</span>
+      <input type="range" id="hurdle" min="1" max="10" step="0.1" value="4" aria-describedby="hurdleAx">
+      <div class="axis" id="hurdleAx">Moves the <b>red threshold line</b> in the gain panel. This is the dominant source of variation.</div>
+    </div>
+    <div class="ctl">
+      <label for="jflop">Hardware energy</label>
+      <span class="val" id="jflopV">2.0×10⁻¹² J/FLOP</span>
+      <input type="range" id="jflop" min="-13" max="-10" step="0.05" value="-11.699">
+      <div class="axis">Translates the carbon curve vertically. Does not move the threshold.</div>
+    </div>
+    <div class="ctl">
+      <label for="grid">Grid carbon intensity</label>
+      <select id="grid">
+        <option value="19">Iceland — 19 g/kWh</option>
+        <option value="20">Norway — 20 g/kWh</option>
+        <option value="80">Quebec — 80 g/kWh</option>
+        <option value="400" selected>US average — 400 g/kWh</option>
+        <option value="800">Coal-heavy — 800 g/kWh</option>
+      </select>
+      <div class="axis">Multiplies the carbon curve. Cannot change which regime you are in.</div>
+    </div>
+    <div class="ctl">
+      <label for="bits">Landauer floor basis</label>
+      <select id="bits">
+        <option value="16" selected>16 bit-erasures / FLOP</option>
+        <option value="32">32 bit-erasures / FLOP</option>
+      </select>
+      <div class="axis">Sets the thermodynamic floor in the hardware-gap card only.</div>
+    </div>
+  </aside>
+
+  <section>
+    <div class="readout">
+      <div>
+        <div class="lbl">Efficiency threshold N*</div>
+        <div class="big" id="nstar">—</div>
+      </div>
+      <div>
+        <div class="lbl">Gain at N*</div>
+        <div class="val" id="gstar" style="font-size:19px">—</div>
+      </div>
+      <span class="stamp ok" id="stamp">INTERPOLATED</span>
+      <div class="note" id="stampNote"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Marginal loss reduction per compute doubling</h2>
+      <div class="cap">Hardware-invariant. Where this curve crosses your hurdle is where vertical scaling stops being efficient.</div>
+      <svg id="p1" viewBox="0 0 640 300" role="img" aria-label="Gain per doubling versus model size"></svg>
+    </div>
+
+    <div class="panel">
+      <h2>Carbon per 1% of loss reduction</h2>
+      <div class="cap">Compute-optimal cost of the next 1%: driven by the frontier's C ∝ N² geometry, scaled by your hardware and grid. Fixed log axis — inputs move the curve, not the ruler.</div>
+      <svg id="p2" viewBox="0 0 640 300" role="img" aria-label="Carbon per one percent loss reduction versus model size"></svg>
+    </div>
+
+    <div class="gaps">
+      <div class="gap"><div class="f" id="gScale">—</div><div class="n">scaling geometry</div>
+        <p>Compute for the next 1% grows ∝N² along the optimal frontier. No hardware fixes it — stop scaling or change architecture.</p></div>
+      <div class="gap"><div class="f">~1.1×</div><div class="n">allocation</div>
+        <p>Real models drift off the frontier (tail to ~240×). Closed by Chinchilla-balanced budgets.</p></div>
+      <div class="gap"><div class="f" id="gHw">—</div><div class="n">hardware → Landauer floor</div>
+        <p>Distance to the thermodynamic limit at your J/FLOP — constant across N. Only a new substrate reclaims it.</p></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p><b>Provenance.</b> Frontier derived from the fitted Chinchilla law L(N,D)=E+A/N<sup>α</sup>+B/D<sup>β</sup> on the 245-point Besiroglu et&nbsp;al. (2024) reconstruction of Hoffmann et&nbsp;al. (2022); parameters and code: <a href="https://github.com/gthubinaction/llm-efficiency-frontier">gthubinaction/llm-efficiency-frontier</a>, tag v2.0.0. Observed range N ∈ [5.7×10⁷, 1.6×10¹⁰] — thresholds beyond it are stamped as extrapolation.</p>
+  <p><b>Scope.</b> Transparent, auditable decision support — not an oracle. Single model family, ~2.5 orders of magnitude; the hurdle rate is an organizational input, not a universal constant.</p>
+</footer>
+
+<script>
+"use strict";
+/* ---- embedded v2 frontier (regenerated by src/analysis.py) ---- */
+const F = {"logN": [7.80811, 7.84339, 7.87866, 7.91393, 7.94921, 7.98448, 8.01976, 8.05503, 8.09031, 8.12558, 8.16086, 8.19613, 8.23141, 8.26668, 8.30196, 8.33723, 8.37251, 8.40778, 8.44306, 8.47833, 8.51361, 8.54888, 8.58416, 8.61943, 8.65471, 8.68998, 8.72525, 8.76053, 8.7958, 8.83108, 8.86635, 8.90163, 8.9369, 8.97218, 9.00745, 9.04273, 9.078, 9.11328, 9.14856, 9.18383, 9.2191, 9.25438, 9.28965, 9.32493, 9.3602, 9.39548, 9.43075, 9.46603, 9.5013, 9.53658, 9.57185, 9.60713, 9.6424, 9.67768, 9.71295, 9.74823, 9.7835, 9.81878, 9.85405, 9.88933, 9.9246, 9.95988, 9.99515, 10.03042, 10.0657, 10.10097, 10.13625, 10.17152, 10.2068, 10.24207, 10.27735, 10.31262, 10.3479, 10.38317, 10.41845, 10.45372, 10.489, 10.52427, 10.55955, 10.59482, 10.6301, 10.66537, 10.70065, 10.73592, 10.7712, 10.80647, 10.84175, 10.87702, 10.91229, 10.94757], "L": [3.52998, 3.48365, 3.43865, 3.39494, 3.35248, 3.31124, 3.27119, 3.23228, 3.19449, 3.15778, 3.12212, 3.08749, 3.05385, 3.02118, 2.98944, 2.95861, 2.92867, 2.89959, 2.87134, 2.8439, 2.81724, 2.79135, 2.76621, 2.74178, 2.71806, 2.69502, 2.67263, 2.65089, 2.62977, 2.60926, 2.58934, 2.56999, 2.55119, 2.53293, 2.5152, 2.49797, 2.48124, 2.46499, 2.4492, 2.43387, 2.41898, 2.40451, 2.39046, 2.37681, 2.36355, 2.35068, 2.33817, 2.32602, 2.31422, 2.30276, 2.29163, 2.28081, 2.27031, 2.26011, 2.2502, 2.24057, 2.23122, 2.22214, 2.21332, 2.20475, 2.19643, 2.18835, 2.1805, 2.17287, 2.16546, 2.15827, 2.15128, 2.14449, 2.1379, 2.13149, 2.12527, 2.11923, 2.11336, 2.10766, 2.10212, 2.09674, 2.09152, 2.08644, 2.08152, 2.07673, 2.07208, 2.06756, 2.06317, 2.05891, 2.05477, 2.05075, 2.04685, 2.04305, 2.03937, 2.03579], "logC": [18.0, 18.0618, 18.1236, 18.18539, 18.24719, 18.30899, 18.37079, 18.43258, 18.49438, 18.55618, 18.61798, 18.67978, 18.74157, 18.80337, 18.86517, 18.92697, 18.98876, 19.05056, 19.11236, 19.17416, 19.23596, 19.29775, 19.35955, 19.42135, 19.48315, 19.54494, 19.60674, 19.66854, 19.73034, 19.79213, 19.85393, 19.91573, 19.97753, 20.03933, 20.10112, 20.16292, 20.22472, 20.28652, 20.34831, 20.41011, 20.47191, 20.53371, 20.59551, 20.6573, 20.7191, 20.7809, 20.8427, 20.90449, 20.96629, 21.02809, 21.08989, 21.15169, 21.21348, 21.27528, 21.33708, 21.39888, 21.46067, 21.52247, 21.58427, 21.64607, 21.70787, 21.76966, 21.83146, 21.89326, 21.95506, 22.01685, 22.07865, 22.14045, 22.20225, 22.26404, 22.32584, 22.38764, 22.44944, 22.51124, 22.57303, 22.63483, 22.69663, 22.75843, 22.82022, 22.88202, 22.94382, 23.00562, 23.06742, 23.12921, 23.19101, 23.25281, 23.31461, 23.3764, 23.4382, 23.5], "N_obs": [57334197.40687078, 16183346310.7305], "fit": {"E": 1.91459, "A": 578.322, "alpha": 0.35827, "B": 21206.3, "beta": 0.47649}};
+
+/* ---- pure math (log-domain interpolation, anti-clamping guards) ---- */
+const log10=Math.log10, pow10=x=>Math.pow(10,x);
+function interp(xs,ys,x){                       // xs ascending
+  if(x<=xs[0])return ys[0];
+  if(x>=xs[xs.length-1])return ys[ys.length-1];
+  let i=1;while(xs[i]<x)i++;
+  const t=(x-xs[i-1])/(xs[i]-xs[i-1]);
+  return ys[i-1]+t*(ys[i]-ys[i-1]);
+}
+const Lof=n=>interp(F.logN,F.L,log10(n));
+const Cof=n=>pow10(interp(F.logN,F.logC,log10(n)));
+const NMIN=pow10(F.logN[0]), NMAX=pow10(F.logN[F.logN.length-1]);
+function gain(n){                               // guard: never read past the grid
+  if(n<NMIN||2*n>NMAX)return NaN;
+  const a=Lof(n);return (a-Lof(2*n))/a;
+}
+function threshold(h){                          // bisection on monotone gain
+  let lo=NMIN, hi=NMAX/2;
+  if(gain(lo)<h)return lo;                      // already below at left edge
+  if(gain(hi)>=h)return NaN;                    // never crosses on grid
+  for(let k=0;k<70;k++){const m=Math.sqrt(lo*hi); (gain(m)>=h)?lo=m:hi=m;}
+  return Math.sqrt(lo*hi);
+}
+function flopsPer1pct(n){                       // ΔC to cut loss by 1% at n
+  const target=.99*Lof(n);
+  if(target<F.L[F.L.length-1])return NaN;       // frontier can't reach it
+  let lo=n, hi=NMAX;
+  for(let k=0;k<70;k++){const m=Math.sqrt(lo*hi);(Lof(m)>target)?lo=m:hi=m;}
+  return Cof(Math.sqrt(lo*hi))-Cof(n);
+}
+const kgCO2per1pct=(n,jf,g)=>flopsPer1pct(n)*jf/3.6e6*g/1000;
+
+/* ---- formatting ---- */
+const SUP={"-":"⁻",0:"⁰",1:"¹",2:"²",3:"³",4:"⁴",5:"⁵",6:"⁶",7:"⁷",8:"⁸",9:"⁹"};
+const sup=e=>String(e).split("").map(c=>SUP[c]).join("");
+const sci=(x,d=1)=>{if(!isFinite(x))return"—";const e=Math.floor(log10(x));
+  return(x/pow10(e)).toFixed(d)+"×10"+sup(e);};
+
+/* ---- SVG plotting ---- */
+const NS="http://www.w3.org/2000/svg";
+function el(t,a){const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;}
+const M={l:62,r:16,t:12,b:40}, W=640, H=300;
+function frame(svg,x0,x1,y0,y1,ylog,xt,yt,xlab,ylab){
+  svg.textContent="";
+  const X=v=>M.l+(v-x0)/(x1-x0)*(W-M.l-M.r);
+  const Y=v=>H-M.b-((ylog?v:v)-y0)/(y1-y0)*(H-M.t-M.b);
+  for(const v of yt){const y=Y(v);
+    svg.appendChild(el("line",{x1:M.l,x2:W-M.r,y1:y,y2:y,stroke:"var(--grid)","stroke-width":1}));
+    const t=el("text",{x:M.l-7,y:y+3,"text-anchor":"end",class:"ax"});
+    t.textContent=ylog?"10"+sup(v):(v*100).toFixed(0)+"%";svg.appendChild(t);}
+  for(const v of xt){const x=X(v);
+    svg.appendChild(el("line",{x1:x,x2:x,y1:H-M.b,y2:H-M.b+4,stroke:"var(--mut)"}));
+    const t=el("text",{x:x,y:H-M.b+15,"text-anchor":"middle",class:"ax"});
+    t.textContent="10"+sup(v);svg.appendChild(t);}
+  const xl=el("text",{x:(M.l+W-M.r)/2,y:H-8,"text-anchor":"middle",class:"axl"});xl.textContent=xlab;svg.appendChild(xl);
+  const yl=el("text",{x:14,y:(M.t+H-M.b)/2,class:"axl",transform:`rotate(-90 14 ${(M.t+H-M.b)/2})`,"text-anchor":"middle"});
+  yl.textContent=ylab;svg.appendChild(yl);
+  return{X,Y};
+}
+function path(svg,pts,color,w,dash){
+  const d=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join("");
+  svg.appendChild(el("path",{d,fill:"none",stroke:color,"stroke-width":w,...(dash?{"stroke-dasharray":dash}:{})}));
+}
+
+const X0=8, X1=10.6;                             // log10 N plotting window
+function draw1(h,nstar){
+  const svg=document.getElementById("p1");
+  const{X,Y}=frame(svg,X0,X1,0,.11,false,[8,9,10],[0,.02,.04,.06,.08,.10],
+    "Model parameters N","Gain per doubling");
+  /* regime shading split at threshold */
+  const xs=isFinite(nstar)?X(Math.min(Math.max(log10(nstar),X0),X1)):W-M.r;
+  svg.insertBefore(el("rect",{x:M.l,y:M.t,width:Math.max(0,xs-M.l),height:H-M.t-M.b,fill:"#eef7f1"}),svg.firstChild);
+  svg.insertBefore(el("rect",{x:xs,y:M.t,width:Math.max(0,W-M.r-xs),height:H-M.t-M.b,fill:"#fdf0ee"}),svg.childNodes[1]);
+  /* observed-range guide */
+  const xo=X(log10(F.N_obs[1]));
+  svg.appendChild(el("line",{x1:xo,x2:xo,y1:M.t,y2:H-M.b,stroke:"#38404e","stroke-width":1.2,"stroke-dasharray":"2 4"}));
+  const to=el("text",{x:xo-4,y:M.t+12,"text-anchor":"end",class:"ax"});to.textContent="max observed N";svg.appendChild(to);
+  /* gain curve */
+  const pts=[];for(let lx=X0;lx<=X1+1e-9;lx+=.01){const g=gain(pow10(lx));if(isFinite(g))pts.push([X(lx),Y(g)]);}
+  path(svg,pts,"var(--ink)",2.4);
+  /* hurdle + threshold */
+  svg.appendChild(el("line",{x1:M.l,x2:W-M.r,y1:Y(h),y2:Y(h),stroke:"var(--signal)","stroke-width":1.6,"stroke-dasharray":"6 4"}));
+  if(isFinite(nstar)&&log10(nstar)>=X0&&log10(nstar)<=X1)
+    svg.appendChild(el("line",{x1:X(log10(nstar)),x2:X(log10(nstar)),y1:M.t,y2:H-M.b,stroke:"var(--signal)","stroke-width":1.6}));
+}
+function draw2(jf,g,nstar){
+  const svg=document.getElementById("p2");
+  const{X,Y}=frame(svg,X0,X1,-3,5,true,[8,9,10],[-3,-1,1,3,5],
+    "Model parameters N","kg CO₂ per 1% loss reduction");
+  const xo=X(log10(F.N_obs[1]));
+  svg.appendChild(el("line",{x1:xo,x2:xo,y1:M.t,y2:H-M.b,stroke:"#38404e","stroke-width":1.2,"stroke-dasharray":"2 4"}));
+  const pts=[];for(let lx=X0;lx<=X1+1e-9;lx+=.01){const c=kgCO2per1pct(pow10(lx),jf,g);
+    if(isFinite(c)&&c>0)pts.push([X(lx),Y(Math.min(Math.max(log10(c),-3),5))]);}
+  path(svg,pts,"var(--ink)",2.4);
+  if(isFinite(nstar)&&log10(nstar)>=X0&&log10(nstar)<=X1)
+    svg.appendChild(el("line",{x1:X(log10(nstar)),x2:X(log10(nstar)),y1:M.t,y2:H-M.b,stroke:"var(--signal)","stroke-width":1.6}));
+}
+
+/* ---- wiring ---- */
+const $=id=>document.getElementById(id);
+function update(){
+  const h=parseFloat($("hurdle").value)/100;
+  const jf=pow10(parseFloat($("jflop").value));
+  const g=parseFloat($("grid").value);
+  const bits=parseFloat($("bits").value);
+  $("hurdleV").textContent=(h*100).toFixed(1)+"%";
+  $("jflopV").textContent=sci(jf)+" J/FLOP";
+  const n=threshold(h);
+  $("nstar").textContent=sci(n,2);
+  $("gstar").textContent=isFinite(n)?(gain(n)*100).toFixed(1)+"% / doubling":"—";
+  const inRange=isFinite(n)&&n>=F.N_obs[0]&&n<=F.N_obs[1];
+  const st=$("stamp");
+  st.textContent=isFinite(n)?(inRange?"INTERPOLATED":"EXTRAPOLATED"):"OFF GRID";
+  st.className="stamp "+(inRange?"ok":"warn");
+  $("stampNote").textContent=isFinite(n)?(inRange
+    ?"Inside the observed range N ∈ [5.7×10⁷, 1.6×10¹⁰]. The threshold is read from the data, not projected beyond it."
+    :"Beyond the observed range — this value relies on the fitted law holding past the data. Treat as a conservative planning bound, not a measurement.")
+    :"The gain curve never crosses this hurdle on the computable grid.";
+  const c9=flopsPer1pct(1e9), c95=flopsPer1pct(Math.sqrt(10)*1e9);
+  $("gScale").textContent="∝N²";
+  $("gHw").textContent=sci(jf/(bits*2.87e-21),0);
+  draw1(h,n); draw2(jf,g,n);
+}
+for(const id of["hurdle","jflop"])$(id).addEventListener("input",update);
+for(const id of["grid","bits"])$(id).addEventListener("change",update);
+update();
+</script>
+</body>
+</html>
