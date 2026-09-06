@@ -347,10 +347,9 @@ function update(){
   } else {v.className="verdict wide";v.textContent="At this hurdle at least one arm has no crossing on the computable range.";}
   /* cards */
   $("gGeo").textContent="∝N^1.95";
-  const cComp=3e-18;
+  const cComp=3e-18, cCarb=pc/1e6*jf/3.6e6*pue*ci;
   $("gCarb").textContent=(cCarb/(cComp+cCarb)*100).toFixed(2)+"%";
   $("gEm").textContent=isFinite(t)?(dC1(t)*jf/3.6e6*pue*ci/1000).toFixed(1)+" kg":"—";
-  const cCarb=pc/1e6*jf/3.6e6*pue*ci;
   if(probeN===null) probeN=isFinite(t)?t:1e9;
   const pg=gain(probeN), pl_=Lstar(CofN(probeN)), pc_=dC1(probeN);
   const kg=pc_*jf/3.6e6*pue*ci/1000, cEff=3e-18+cCarb;
