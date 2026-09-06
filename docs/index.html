@@ -47,6 +47,14 @@ svg{width:100%;height:auto;display:block}
 .verdict.narrow{background:#eef7f1;border-color:#bcd9c8;color:#17543a}
 .verdict.wide{background:#fbf3e4;border-color:#e3cfa4;color:#7d4f08}
 .verdict b{font-family:var(--mono)}
+.probe{display:flex;flex-wrap:wrap;gap:4px 22px;align-items:baseline;background:#f7f9fc;border:1px solid var(--grid);border-radius:5px;padding:9px 13px;margin:6px 0 4px}
+.probe .pl{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.probe .pv{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--ink);margin-left:6px}
+.probe .reg{font-family:var(--mono);font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:3px;border:1.4px solid}
+.probe .reg.go{color:var(--ok);border-color:var(--ok);background:#eef7f1}
+.probe .reg.stop{color:var(--sig);border-color:var(--sig);background:#fbeeec}
+.hint{font-size:11px;color:var(--mut);font-style:italic;margin:2px 0 6px}
+svg.grab{cursor:crosshair;touch-action:none}
 .gaps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
 @media(max-width:860px){.gaps{grid-template-columns:1fr}}
 .gap{background:var(--panel);border:1px solid var(--grid);border-radius:6px;padding:11px 13px}
@@ -87,16 +95,26 @@ footer p{margin-top:6px}
     <div class="ctl">
       <label for="grid">Grid carbon intensity</label>
       <select id="grid">
-        <option value="19">Iceland &middot; 19 g/kWh</option>
-        <option value="20">Norway &middot; 20 g/kWh</option>
-        <option value="25">Paraguay &middot; 25 g/kWh (hydro, export surplus)</option>
-        <option value="80">Quebec &middot; 80 g/kWh</option>
-        <option value="103">Brazil &middot; 103 g/kWh</option>
-        <option value="185">Nordic average &middot; 185 g/kWh</option>
-        <option value="400" selected>US average &middot; 400 g/kWh</option>
-        <option value="800">Coal-heavy &middot; 800 g/kWh</option>
+        <optgroup label="Low-carbon grids">
+          <option value="19">Iceland &middot; 19 g/kWh (geothermal, hydro)</option>
+          <option value="20">Norway &middot; 20 g/kWh (hydro)</option>
+          <option value="24">Sweden &middot; 24 g/kWh (hydro, nuclear)</option>
+          <option value="25">Paraguay &middot; 25 g/kWh (hydro, export surplus)</option>
+          <option value="35">France &middot; 35 g/kWh (nuclear)</option>
+          <option value="80">Quebec &middot; 80 g/kWh (hydro)</option>
+          <option value="103">Brazil &middot; 103 g/kWh (hydro, wind)</option>
+        </optgroup>
+        <optgroup label="Reference averages">
+          <option value="213">European Union &middot; 213 g/kWh</option>
+          <option value="400" selected>United States &middot; 400 g/kWh</option>
+          <option value="473">World &middot; 473 g/kWh</option>
+        </optgroup>
+        <optgroup label="Where compute actually sits">
+          <option value="545">US hyperscale DCs &middot; 545 g/kWh</option>
+          <option value="800">Coal-heavy grid &middot; 800 g/kWh</option>
+        </optgroup>
       </select>
-      <div class="axis">A multiplier on emissions; it cannot change which regime you are in. What matters for siting is not only how clean a grid is but whether it has uncommitted low-carbon capacity. National figures: Ember (2025), 2024 generation intensity; Paraguay approximated from a near-100% hydro mix.</div>
+      <div class="axis">A multiplier on emissions; it cannot change which regime you are in. What matters for siting is not only how clean a grid is but whether it has uncommitted low-carbon capacity. National figures: Ember (2025), 2024 generation. Hyperscale figure is the electricity-weighted average of US hyperscale sites, about 48% above the national mean: compute clusters in dirtier-than-average grids.</div>
     </div>
     <div class="ctl">
       <label for="pco2">Carbon price ($/tCO₂e)</label>
@@ -117,7 +135,17 @@ footer p{margin-top:6px}
     <div class="panel">
       <h2>Marginal loss reduction per compute doubling</h2>
       <div class="cap">Along the expansion path implied by the fitted production function. Hardware-invariant: where this curve crosses your hurdle is where further capacity commitment fails the criterion.</div>
-      <svg id="p1" viewBox="0 0 640 300" role="img" aria-label="Gain per compute doubling versus model size"></svg>
+      <div class="hint">Drag anywhere on the chart to probe a scale; drag the red handle to move the hurdle.</div>
+      <svg id="p1" class="grab" viewBox="0 0 640 300" role="img" aria-label="Gain per compute doubling versus model size"></svg>
+      <div class="probe">
+        <span><span class="pl">at N</span><span class="pv" id="pN">—</span></span>
+        <span><span class="pl">gain/doubling</span><span class="pv" id="pG">—</span></span>
+        <span><span class="pl">frontier loss</span><span class="pv" id="pL">—</span></span>
+        <span><span class="pl">ΔC per 1%</span><span class="pv" id="pC">—</span></span>
+        <span><span class="pl">CO₂e per 1%</span><span class="pv" id="pE">—</span></span>
+        <span><span class="pl">break-even 1%</span><span class="pv" id="pV">—</span></span>
+        <span class="reg go" id="pR">—</span>
+      </div>
     </div>
 
     <div class="panel">
@@ -223,6 +251,19 @@ function obsBands(svg,X,x0,x1){
 }
 const X0=7.6,X1=11.4;
 
+let probeN=null, dragMode=null;
+function xToN(svg,evt,x0,x1){
+  const r=svg.getBoundingClientRect();
+  const px=((evt.clientX-r.left)/r.width)*W;
+  const lx=x0+(px-M.l)/(W-M.l-M.r)*(x1-x0);
+  return pow10(Math.min(Math.max(lx,x0),x1));
+}
+function yToVal(svg,evt,y0,y1){
+  const r=svg.getBoundingClientRect();
+  const py=((evt.clientY-r.top)/r.height)*H;
+  const v=y0+((H-M.b)-py)/(H-M.t-M.b)*(y1-y0);
+  return Math.min(Math.max(v,y0),y1);
+}
 function drawGain(h,t){
   const svg=document.getElementById("p1");
   const{X,Y}=frame(svg,X0,10.8,0,9,[8,9,10],[0,2,4,6,8],"Model parameters N","Gain per compute doubling",false);
@@ -233,6 +274,14 @@ function drawGain(h,t){
   if(isFinite(t)&&log10(t)>=X0&&log10(t)<=10.8){
     svg.appendChild(el("line",{x1:X(log10(t)),x2:X(log10(t)),y1:M.t,y2:H-M.b,stroke:"var(--sig)","stroke-width":1.6}));
     svg.appendChild(el("circle",{cx:X(log10(t)),cy:Y(h*100),r:4.5,fill:"var(--sig)"}));
+  }
+  /* draggable hurdle handle */
+  svg.appendChild(el("circle",{cx:W-M.r,cy:Y(h*100),r:6,fill:"var(--sig)",stroke:"#fff","stroke-width":2,style:"cursor:ns-resize"}));
+  /* probe marker */
+  if(probeN&&log10(probeN)>=X0&&log10(probeN)<=10.8){
+    const px=X(log10(probeN)), g=gain(probeN)*100;
+    svg.appendChild(el("line",{x1:px,x2:px,y1:M.t,y2:H-M.b,stroke:"var(--ink)","stroke-width":1.1,"stroke-dasharray":"3 3"}));
+    svg.appendChild(el("circle",{cx:px,cy:Y(Math.min(g,9)),r:5.5,fill:"#fff",stroke:"var(--ink)","stroke-width":2.4}));
   }
 }
 function drawBracket(h,tp,tl){
@@ -262,6 +311,12 @@ function drawCost(t,jf,pue,ci){
   line(svg,pts,"var(--ink)",2.5);
   if(isFinite(t)&&log10(t)>=X0&&log10(t)<=10.8)
     svg.appendChild(el("line",{x1:X(log10(t)),x2:X(log10(t)),y1:M.t,y2:H-M.b,stroke:"var(--sig)","stroke-width":1.6}));
+  if(probeN&&log10(probeN)>=X0&&log10(probeN)<=10.8){
+    const px=X(log10(probeN));
+    svg.appendChild(el("line",{x1:px,x2:px,y1:M.t,y2:H-M.b,stroke:"var(--ink)","stroke-width":1.1,"stroke-dasharray":"3 3"}));
+    const v=log10(dC1(probeN));
+    if(isFinite(v))svg.appendChild(el("circle",{cx:px,cy:Y(Math.min(Math.max(v,16),23)),r:5.5,fill:"#fff",stroke:"var(--ink)","stroke-width":2.4}));
+  }
 }
 
 const $=id=>document.getElementById(id);
@@ -292,11 +347,55 @@ function update(){
   } else {v.className="verdict wide";v.textContent="At this hurdle at least one arm has no crossing on the computable range.";}
   /* cards */
   $("gGeo").textContent="∝N^1.95";
-  const cComp=3e-18, cCarb=pc/1e6*jf/3.6e6*pue*ci;
+  const cComp=3e-18;
   $("gCarb").textContent=(cCarb/(cComp+cCarb)*100).toFixed(2)+"%";
   $("gEm").textContent=isFinite(t)?(dC1(t)*jf/3.6e6*pue*ci/1000).toFixed(1)+" kg":"—";
+  const cCarb=pc/1e6*jf/3.6e6*pue*ci;
+  if(probeN===null) probeN=isFinite(t)?t:1e9;
+  const pg=gain(probeN), pl_=Lstar(CofN(probeN)), pc_=dC1(probeN);
+  const kg=pc_*jf/3.6e6*pue*ci/1000, cEff=3e-18+cCarb;
+  $("pN").textContent=sci(probeN);
+  $("pG").textContent=isFinite(pg)?(pg*100).toFixed(2)+"%":"—";
+  $("pL").textContent=pl_.toFixed(3);
+  $("pC").textContent=sci(pc_,1)+" FLOP";
+  $("pE").textContent=(kg>=1000?(kg/1000).toFixed(1)+" t":kg.toFixed(1)+" kg");
+  $("pV").textContent="$"+(cEff*pc_).toLocaleString(undefined,{maximumFractionDigits:0});
+  const R=$("pR"), below=pg<h;
+  R.textContent=below?"BELOW HURDLE — STOP":"ABOVE HURDLE — CONTINUE";
+  R.className="reg "+(below?"stop":"go");
   drawGain(h,t); drawBracket(h,tp,tl); drawCost(t,jf,pue,ci);
 }
+(function(){
+  const p1=$("p1"), p3=$("p3");
+  function handleHit(svg,evt){          /* está sobre a alça do hurdle? */
+    const r=svg.getBoundingClientRect();
+    const px=((evt.clientX-r.left)/r.width)*W;
+    return px > W-M.r-14;
+  }
+  function onDown(svg,evt){
+    evt.preventDefault();
+    dragMode=(svg===p1 && handleHit(svg,evt))?"hurdle":"probe";
+    svg.setPointerCapture(evt.pointerId);
+    onMove(svg,evt);
+  }
+  function onMove(svg,evt){
+    if(!dragMode)return;
+    if(dragMode==="hurdle"){
+      const v=yToVal(svg,evt,0,9);
+      $("hurdle").value=Math.min(Math.max(v,0.5),8).toFixed(1);
+    }else{
+      probeN=xToN(svg,evt,X0,10.8);
+    }
+    update();
+  }
+  for(const svg of [p1,p3]){
+    svg.addEventListener("pointerdown",e=>onDown(svg,e));
+    svg.addEventListener("pointermove",e=>{if(dragMode)onMove(svg,e);});
+    svg.addEventListener("pointerup",()=>{dragMode=null;});
+    svg.addEventListener("pointercancel",()=>{dragMode=null;});
+  }
+  p3.classList.add("grab");
+})();
 ["hurdle","jflop","pue","pco2"].forEach(i=>$(i).addEventListener("input",update));
 $("grid").addEventListener("change",update);
 update();
