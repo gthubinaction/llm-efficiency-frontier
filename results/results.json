@@ -1,113 +1,327 @@
 {
-  "L_ND": {
-    "E": 1.9145884789854692,
-    "A": 578.3221879866188,
-    "alpha": 0.3582683682077886,
-    "B": 21206.296656747258,
-    "beta": 0.4764884498616949,
-    "R2": 0.9405113690041305
+  "frozen_parameters": {
+    "A": 477.82587107803005,
+    "B": 2143.4173885313667,
+    "E": 1.8172180999692416,
+    "alpha": 0.3473104992235614,
+    "beta": 0.36717243320038173
   },
+  "published_reference": {
+    "A": 482.01,
+    "B": 2085.43,
+    "E": 1.8172,
+    "alpha": 0.3478,
+    "beta": 0.3658
+  },
+  "parameter_deviation_pct": {
+    "A": -0.868058530314712,
+    "B": 2.7805962574321286,
+    "E": 0.0009960361678200004,
+    "alpha": -0.14074202887826673,
+    "beta": 0.3751867688304312
+  },
+  "frontier_elasticity_a": 0.5138995160524249,
+  "compute_exponent": 1.9459057048381927,
+  "N_doubling_compute_factor": 3.8527957474812675,
   "observed_N_range": [
     57334197.40687078,
     16183346310.7305
   ],
-  "threshold_by_hurdle": {
-    "2%": {
-      "N": 24945601940.15858,
-      "log10N": 10.396993987975952,
-      "within_observed_range": false
-    },
+  "gains_per_compute_doubling": {
+    "1e+08": 0.05353842969513326,
+    "3e+08": 0.042802326023226527,
+    "1e+09": 0.03222584872389656,
+    "3e+09": 0.024122690697855904,
+    "1e+10": 0.017089700569295607
+  },
+  "thresholds": {
     "4%": {
-      "N": 2681988515.4600353,
-      "log10N": 9.428456913827656,
-      "within_observed_range": true
+      "N": 406014221.2223403,
+      "log10N": 8.608541245622076,
+      "status": "interpolated"
     },
-    "6%": {
-      "N": 624296329.5341653,
-      "log10N": 8.795390781563126,
-      "within_observed_range": true
+    "3%": {
+      "N": 1324784633.6584973,
+      "log10N": 9.122145282034385,
+      "status": "interpolated"
     },
-    "8%": {
-      "N": 191144904.61927354,
-      "log10N": 8.281362725450903,
-      "within_observed_range": true
+    "2%": {
+      "N": 5836526754.642414,
+      "log10N": 9.766154480670172,
+      "status": "interpolated"
+    },
+    "1%": {
+      "N": 57063444818.87555,
+      "log10N": 10.75635798569944,
+      "status": "extrapolated_above"
     }
   },
-  "gain_at_1e9": 0.05275507288540401,
-  "gain_at_1e10": 0.026719242293680896,
-  "frontier_loss": {
-    "1e8": 3.293625188621454,
-    "1e9": 2.5189443561163336,
-    "1e10": 2.1794477086240036
+  "dC_per_1pct": {
+    "1e+08": 2.0128426538352973e+17,
+    "1e+09": 3.1036967999014863e+19,
+    "1e+10": 5.802609136820734e+21
   },
-  "model_derived_frontier_fits": {
-    "log_fit": {
-      "params": {
-        "c": 9.406494368368007,
-        "a": 7.969547330813051e-07,
-        "b": 1.3517771215854189,
-        "E": 1.1363108425074404
+  "empirical_validation": {
+    "envelope_compute_matched": {
+      "n": 13,
+      "power": {
+        "R2": 0.9991779948435422,
+        "MAPE": 0.30658393435423126,
+        "AIC": -114.77718183078775,
+        "LOOCV": 0.014011898424070387,
+        "params": [
+          2783.1848460243714,
+          0.17856139062539925,
+          1.7952578187448063
+        ]
       },
-      "param_SE": {
-        "c": 1.117682096413512,
-        "a": 3.6876791846939374e-07,
-        "b": 5.776014244605264,
-        "E": 0.07082442557224691
-      },
-      "identifiability_note": "b is unidentifiable over this range (SE(b) >> |b|); aN >> b for all observed N, so the form degenerates to c/ln(aN)+E. Reported for transparency.",
-      "R2": 0.9969700845937152,
-      "MAPE": 0.825938294523054,
-      "AIC": -671.5940313382044,
-      "BIC": -661.5947926568833
+      "log": {
+        "R2": 0.9694700432882398,
+        "MAPE": 1.8877619955468643,
+        "AIC": -65.78586083421419,
+        "LOOCV": 0.16997893292585145,
+        "params": [
+          37.10584971050255,
+          5.546575206182579e-13,
+          0.21081059810834343,
+          0.5017299250976573
+        ]
+      }
     },
-    "power_fit": {
-      "params": {
-        "A": 1013.16548149315,
-        "beta": 0.358268746155477,
-        "E": 1.9145889308364352
+    "thresholds_model_vs_empirical": {
+      "4%": {
+        "compute_model": 2.347622702014048e+19,
+        "compute_empirical": 2.765194992680352e+19,
+        "compute_ratio": 0.848989929545061,
+        "size_model": 406014221.2223402,
+        "size_empirical": 441649961.10031176,
+        "size_ratio": 0.9193122540095104
       },
-      "R2": 0.9999999999992611,
-      "MAPE": 9.549622316370449e-06,
-      "AIC": -2665.693999045412,
-      "BIC": -2658.1945700344213
+      "3%": {
+        "compute_model": 2.344516670298824e+20,
+        "compute_empirical": 2.7576091545016903e+20,
+        "compute_ratio": 0.8501990452386957,
+        "size_model": 1324784633.6584973,
+        "size_empirical": 1440007005.6370578,
+        "size_ratio": 0.9199848531795259
+      },
+      "2%": {
+        "compute_model": 4.199856953635975e+21,
+        "compute_empirical": 4.931974624647215e+21,
+        "compute_ratio": 0.8515568860892896,
+        "size_model": 5836526754.642413,
+        "size_empirical": 6338954643.9403925,
+        "size_ratio": 0.9207396301883519
+      }
     },
-    "note": "Fitted to 80 model-derived frontier points. The power law's near-perfect fit here is expected by construction and is NOT evidence of empirical superiority; see empirical_frontier_fits for the non-circular test."
+    "envelope_by_model_size": {
+      "n": 15,
+      "power": {
+        "R2": 0.9725502251277718,
+        "MAPE": 1.4096892122688534,
+        "AIC": -85.4190978929332,
+        "LOOCV": 0.07010927380921159,
+        "params": [
+          2179.3004916695472,
+          0.4203202410887407,
+          2.0185278522120775
+        ]
+      },
+      "log": {
+        "R2": 0.9629231041841007,
+        "MAPE": 1.6387228009038364,
+        "AIC": -78.909557071127,
+        "LOOCV": 0.07219556282026823,
+        "params": [
+          8.620196442269556,
+          1.493282260164767e-06,
+          7.1278141688827815e-06,
+          1.222585085988179
+        ]
+      }
+    },
+    "note": "The compute-matched envelope is the empirical counterpart of a locus derived under a budget constraint and is the object the decision is made against, and agreement is reported in compute because the translation to model size borrows the map being checked. On it the power law is decisively preferred. On an envelope defined over model size the two forms appear statistically indistinguishable; that comparison is not decision-relevant and should not be used to license extrapolation."
   },
-  "empirical_frontier_fits": {
-    "n_points": 15,
-    "log_fit": {
-      "params": {
-        "c": 7.22020614889352,
-        "a": 8.683007086005378e-07,
-        "b": 0.0017989494436968126,
-        "E": 1.3310648527298246
-      },
-      "R2": 0.9634066042523549,
-      "MAPE": 1.6245084935368987,
-      "AIC": -79.10645069004268,
-      "BIC": -76.27424988563384,
-      "LOOCV_RMSE": 0.07101877262943998
-    },
-    "power_fit": {
-      "params": {
-        "A": 2407.734541720651,
-        "beta": 0.4260924829733112,
-        "E": 2.025159260560918
-      },
-      "R2": 0.9715982295011735,
-      "MAPE": 1.4289821833505352,
-      "AIC": -84.90769512014171,
-      "BIC": -82.78354451683508,
-      "LOOCV_RMSE": 0.0719202758379958
-    },
-    "note": "Fits and LOOCV on the 15 real envelope points. This is the non-circular comparison; the fit to the model-derived frontier below is near-exact for the power law BY CONSTRUCTION."
+  "economic_parameters": {
+    "c_compute": 3e-18,
+    "p_CO2": 80.0,
+    "e_flop": 2e-12,
+    "PUE": 1.2,
+    "CI_grid": 400.0,
+    "c_eff": 3.021333333333333e-18,
+    "note": "Scenario inputs, not measurements; see source comments."
   },
-  "monte_carlo_threshold_4pct": {
-    "median": 9.37434869739479,
-    "ci_low": 9.271543086172345,
-    "ci_high": 9.482565130260522,
-    "n_valid": 800,
-    "deterministic_log10": 9.428456913827656,
-    "median_minus_deterministic": -0.054108216432865675
+  "hurdle_value_correspondence": {
+    "4%": {
+      "N_star": 406014221.2223403,
+      "dC": 4.222949252996301e+18,
+      "V1_star": 12.758937343052821
+    },
+    "3%": {
+      "N_star": 1324784633.6584973,
+      "dC": 5.81772498116531e+19,
+      "V1_star": 175.77286409760788
+    },
+    "2%": {
+      "N_star": 5836526754.642414,
+      "dC": 1.6763519895059395e+21,
+      "V1_star": 5064.818144293945
+    }
+  },
+  "envelope_band_sensitivity": {
+    "10": {
+      "n_points": 9,
+      "power_LOOCV": 0.014305884528780401,
+      "log_LOOCV": 0.1718815078501793,
+      "power_preferred": true,
+      "compute_ratio_4pct": 1.066706956873809
+    },
+    "12": {
+      "n_points": 11,
+      "power_LOOCV": 0.011132289926365543,
+      "log_LOOCV": 0.1880489497225982,
+      "power_preferred": true,
+      "compute_ratio_4pct": 0.8423958294862368
+    },
+    "15": {
+      "n_points": 13,
+      "power_LOOCV": 0.014011898424070387,
+      "log_LOOCV": 0.16997893292585145,
+      "power_preferred": true,
+      "compute_ratio_4pct": 0.848989929545061
+    },
+    "20": {
+      "n_points": 17,
+      "power_LOOCV": 0.015357122279913189,
+      "log_LOOCV": 0.15028653198595676,
+      "power_preferred": true,
+      "compute_ratio_4pct": 0.9563780039046932
+    },
+    "25": {
+      "n_points": 22,
+      "power_LOOCV": 0.010224640041705172,
+      "log_LOOCV": 0.1587689030665545,
+      "power_preferred": true,
+      "compute_ratio_4pct": 0.9372931387577211
+    }
+  },
+  "sample_composition": {
+    "n_total": 245,
+    "domain_excluded": {
+      "indices": [
+        212,
+        227
+      ],
+      "losses": [
+        4.665232074214,
+        5.005581996196243
+      ]
+    },
+    "high_loss_excluded": {
+      "indices": [
+        188,
+        196,
+        206,
+        212,
+        227
+      ],
+      "losses": [
+        3.446995430227908,
+        3.793872243318985,
+        3.7655629197937,
+        4.665232074214,
+        5.005581996196243
+      ]
+    },
+    "overlap_indices": [
+      212,
+      227
+    ],
+    "n_row1": 243,
+    "n_row2": 240,
+    "note": "Row 1 drops only the domain exclusions. Row 2 drops the union of the domain exclusions and the five highest-loss points; the overlap is why removing five points reduces the count by three."
+  },
+  "decomposition": {
+    "geometry_exponent": 1.9459057048381927,
+    "allocation": {
+      "n": 243,
+      "dropped": 2,
+      "median": 1.079502277567746,
+      "p90": 1.7292696306981292,
+      "max": 24.595640804717902,
+      "share_above_2x": 0.06995884773662552,
+      "sensitivity": {
+        "full_sample": {
+          "n": 243,
+          "dropped": 2,
+          "median": 1.079502277567746,
+          "p90": 1.7292696306981292,
+          "max": 24.595640804717902,
+          "share_above_2x": 0.06995884773662552
+        },
+        "excluding_5_high_loss": {
+          "n": 240,
+          "dropped": 0,
+          "median": 1.0779597667326428,
+          "p90": 1.6782077286653736,
+          "max": 6.621807670680174,
+          "share_above_2x": 0.058333333333333334
+        }
+      }
+    },
+    "hardware_gap_not_reported": "Converting a floor on irreversible bit erasure into a bound per floating-point operation requires assumptions about erasures per operation that are not justified here; no result depends on this quantity.",
+    "note": "Geometry is a property of the production function and is not addressable by hardware. Allocation is the distance from the expansion path and is closed by budget balancing. The hardware gap to the Landauer bound closes only with a change of substrate."
+  },
+  "monte_carlo_4pct": {
+    "1%": {
+      "median": 404465404.6771839,
+      "ci": [
+        368023603.8172281,
+        441907506.611003
+      ],
+      "n": 800
+    },
+    "2%": {
+      "median": 403426495.5046562,
+      "ci": [
+        327522110.9367819,
+        479864373.30997926
+      ],
+      "n": 800
+    },
+    "5%": {
+      "median": 394548843.9279551,
+      "ci": [
+        187024252.83259487,
+        589098898.2743499
+      ],
+      "n": 800
+    }
+  },
+  "bootstrap_CI95": {
+    "A": [
+      282.8188057885969,
+      734.742042310044
+    ],
+    "B": [
+      1049.8917439955069,
+      5974.81018326571
+    ],
+    "E": [
+      1.7703687985050436,
+      1.8692502481731677
+    ],
+    "alpha": [
+      0.31649466909598833,
+      0.37260649063124424
+    ],
+    "beta": [
+      0.3320344217267492,
+      0.4176857793550639
+    ],
+    "a": [
+      0.48258254927715705,
+      0.555578151846867
+    ]
   }
 }

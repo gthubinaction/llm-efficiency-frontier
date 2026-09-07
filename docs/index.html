@@ -149,12 +149,12 @@ footer p{margin-top:6px}
     </div>
 
     <div class="panel">
-      <h2>Extrapolation bracket — how much of the answer is the data?</h2>
-      <div class="cap">Two single-variable forms fitted to the 15-point empirical envelope. They are statistically indistinguishable over the observed range and diverge beyond it; the gap between their stopping scales measures how much of the recommendation rests on functional form rather than on evidence.</div>
+      <h2>Empirical validation — does the observed frontier agree?</h2>
+      <div class="cap">The empirical counterpart of the fitted path is the compute-matched envelope: the lowest observed loss in each band of training compute. The fitted path passes through it, and the stopping scales it implies sit within 8% of the model's at every hurdle. On this object the power law is decisively preferred; on an envelope defined over model size the two forms look equivalent, which is why the comparison object matters.</div>
       <div class="key">
-        <span><i style="border-top:2.6px solid var(--ink)"></i>Power-law arm</span>
-        <span><i style="border-top:2.6px dashed var(--alt)"></i>Reciprocal-logarithmic arm</span>
-        <span><i style="border-top:2.6px dotted var(--mut)"></i>Observed data range</span>
+        <span><i style="border-top:2.6px solid var(--ink)"></i>Fitted expansion path</span>
+        <span><i style="border-top:2.6px dashed var(--alt)"></i>Reciprocal-log (rejected on this object)</span>
+        <span style="color:var(--ok)">◆ Compute-matched envelope (n=13)</span>
       </div>
       <svg id="p2" viewBox="0 0 640 300" role="img" aria-label="Extrapolation bracket"></svg>
       <div class="verdict narrow" id="verdict"></div>
@@ -191,6 +191,7 @@ const C={"A":477.79964349370623,"B":2143.402564076622,"E":1.8172131868493112,
 "lg":[7.220380349512783,8.683686572387911e-7,0.001869604243223385,1.331052203860214],
 "Nmin":57334197.40687078,"Nmax":16183346310.7305};
 
+const V={"pw": [2783.1836070780137, 0.17856137937686778, 1.795257767682178], "lg": [45.26590511555915, 4.033765303338355e-11, 1.0535259863546713, 0.6162065871085068], "env": [[2.0558971596900728e+18, 3.3004424648947897], [3.93360146377242e+18, 3.108464556029377], [7.99750935882534e+18, 2.962954091342755], [1.5753731022006288e+19, 2.845487739252996], [2.824494046355417e+19, 2.736778556603052], [5.362153673164827e+19, 2.628284835801397], [9.638582780528e+19, 2.546878120316004], [1.7522877872156135e+20, 2.486552675770553], [2.930178015323031e+20, 2.398733033445379], [5.870141868383024e+20, 2.331416878272676], [9.76866315811358e+20, 2.286445840825226], [1.7950361606125186e+21, 2.249076295522973], [2.9558018830090366e+21, 2.205693537488266]], "r2p": 0.9991779948435423, "r2l": 0.8264196537959145, "loop": 0.01401190275989591, "lool": 0.15516375045237715, "ratio": 0.9193122601359851};
 const log10=Math.log10,pow10=x=>Math.pow(10,x);
 /* closed-form expansion path from the frozen production function */
 const Nstar=Cc=>C.K1*Math.pow(Cc/6,C.ax);

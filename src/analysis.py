@@ -1,37 +1,41 @@
 """
-Reproducible analysis pipeline (v2) for:
-"Sustainable Resource Allocation in LLM Training: A Production Engineering
-Framework with Efficiency Frontier Analysis"
+Reproducible analysis pipeline (v4.0.0)
 
-Single entry point: produces all fitted parameters, the compute-optimal
-frontier, marginal-gain thresholds, a Monte Carlo robustness test, and every
-figure / table from one dataset. No manual processing.
+"Capacity Allocation Under Diminishing Marginal Returns in Large Language Model
+Training: A Production-Economic Decision Rule Coupling Scaling Laws with Cost
+and Carbon Constraints"
 
-Data: reconstructed Hoffmann et al. (2022) points from Besiroglu et al. (2024),
-Epoch AI repo `epoch-research/analyzing-chinchilla`.
+One command regenerates every number, table and figure reported in the paper.
 
-Changelog v2 (vs. v1):
-  [FIX-1] Compute-budget grid extended to 1e23 FLOP so that the marginal-gain
-          curve g(N) = [L*(N) - L*(2N)] / L*(N) never evaluates L* beyond the
-          frontier grid. In v1, np.interp silently clamped L*(2N) to the last
-          grid value for N > Nf.max/2, inflating apparent gains decay: the
-          reported 0.9% at N=1e10 is actually ~2.7%, and the 2% threshold is
-          ~2.5e10 (outside the observed N range -> extrapolation), not 7.8e9.
-  [FIX-2] Thresholds are now flagged as interpolated vs. extrapolated relative
-          to the observed N range of the data.
-  [FIX-3] The logarithmic form is implemented exactly as written in the
-          manuscript, L(N) = c / ln(a*N + b) + E, and its parameter standard
-          errors are reported. Over this range b is unidentifiable (SE >> |b|),
-          which is documented in results.json rather than hidden by bounds.
-  [NEW-1] Non-circular model comparison: both single-variable forms are also
-          fitted to the 15-point EMPIRICAL frontier (real envelope points),
-          with leave-one-out cross-validation. The fit to the model-derived
-          frontier is kept but explicitly labelled as such (a power law fitted
-          to the frontier of a power law is near-exact by construction).
-  [NEW-2] The deterministic-vs-Monte-Carlo threshold gap is quantified and
-          explained: refitting under noise biases the threshold slightly
-          downward (Jensen-type effect of the nonlinear refit), which is why
-          the MC median (~2.4e9) sits below the deterministic value (~2.7e9).
+    PYTHONPATH=. python src/analysis.py
+
+Design rules enforced here, in order:
+
+  1. REPLICATE, THEN FREEZE. The production-function parameters are obtained by
+     replicating the estimation protocol of the source reconstruction exactly
+     (Huber loss on log-residuals in log-sum-exp form, delta=1e-3, L-BFGS-B from
+     a grid of starts, on the 240 points remaining after the five highest-loss
+     outliers are excluded). They are then frozen. No downstream quantity is
+     inherited from an earlier specification; everything is recomputed from the
+     frozen values.
+
+  2. CLOSED FORM, NOT GRIDS. The expansion path follows from the first-order
+     condition of  min L(N,D) s.t. 6ND = C, so every frontier quantity is
+     evaluated analytically. This removes interpolation error and the clamping
+     failure mode that affected v1/v2.
+
+  3. THE DECISION VARIABLE IS COMPUTE. Marginal gain is defined per doubling of
+     COMPUTE, not of model size. On the path N grows as C^a with a ~ 0.514, so
+     doubling N corresponds to 3.85x the compute; a metric on N -> 2N would
+     report the gain from almost four times the resources.
+
+  4. COMPARE LIKE WITH LIKE. The empirical counterpart of the path is the
+     compute-matched envelope: lowest observed loss per band of training
+     compute. An envelope over bands of model size is NOT comparable to a locus
+     derived under a budget constraint, and using it produces materially
+     different (and misleading) conclusions -- see CHANGELOG v4.0.0.
+
+Data: Besiroglu et al. (2024) public reconstruction of Hoffmann et al. (2022).
 """
 import json
 import os
@@ -40,300 +44,485 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit, least_squares, minimize_scalar, brentq
+from itertools import product
+from scipy.optimize import minimize, curve_fit, brentq
 
-RNG = np.random.default_rng(7)
 DATA = "data/llm_scaling_dataset.csv"
-DATA_EMP_FRONTIER = "data/llm_scaling_frontier.csv"
-OUT_FIG = "figures/"
-OUT_RES = "results/"
+OUT_FIG, OUT_RES = "figures/", "results/"
+DELTA = 1e-3                      # Huber delta of the source protocol
+OPT = dict(ftol=1e-15, gtol=1e-12, maxiter=5000)
+N_OUTLIERS = 5                    # highest-loss points excluded, as in source
+RNG_MC, RNG_BOOT = 7, 42
+INK, SIG, OK, ALT, MUT = "#1f3b73", "#c0392b", "#1e6f45", "#8a5a1e", "#8a8a8a"
 
 # ----------------------------------------------------------------------
-# Load
+# 1. Estimation: replicate the source protocol, then freeze
 # ----------------------------------------------------------------------
 def load():
     d = pd.read_csv(DATA)
-    return d.N.values, d.D.values, d.loss.values
+    return d.N.values, d.D.values, d.loss.values, d.C_flop.values
 
-def load_empirical_frontier():
-    d = pd.read_csv(DATA_EMP_FRONTIER)
-    return d.N.values, d.loss.values
+def _objective(p, lnN, lnD, lnL):
+    """Huber loss on log-residuals, log-sum-exp form, with analytic gradient."""
+    a, b, e, al, be = p
+    x1, x2 = a - al * lnN, b - be * lnD
+    x3 = np.full_like(lnN, e)
+    m = np.maximum(np.maximum(x1, x2), x3)
+    e1, e2, e3 = np.exp(x1 - m), np.exp(x2 - m), np.exp(x3 - m)
+    Z = e1 + e2 + e3
+    r = m + np.log(Z) - lnL
+    ar = np.abs(r)
+    h = np.where(ar <= DELTA, 0.5 * r ** 2, DELTA * (ar - 0.5 * DELTA))
+    dh = np.where(ar <= DELTA, r, DELTA * np.sign(r))
+    s1, s2, s3 = e1 / Z, e2 / Z, e3 / Z
+    g = np.array([np.sum(dh * s1), np.sum(dh * s2), np.sum(dh * s3),
+                  np.sum(dh * -lnN * s1), np.sum(dh * -lnD * s2)])
+    return np.sum(h), g
+
+def fit_source_protocol(N, D, L, grid_search=True, p0=None):
+    lnN, lnD, lnL = np.log(N), np.log(D), np.log(L)
+    starts = (list(product(np.arange(0, 30, 5), np.arange(0, 30, 5),
+                           np.arange(-1, 1.5, .5), np.arange(0, 2.5, .5),
+                           np.arange(0, 2.5, .5)))
+              if grid_search else [p0])
+    best = (np.inf, None)
+    for s in starts:
+        r = minimize(_objective, list(s), args=(lnN, lnD, lnL), jac=True,
+                     method="L-BFGS-B", options=OPT)
+        if r.fun < best[0]:
+            best = (r.fun, r.x)
+    a, b, e, al, be = best[1]
+    return dict(A=float(np.exp(a)), B=float(np.exp(b)), E=float(np.exp(e)),
+                alpha=float(al), beta=float(be)), best[1]
+
+def drop_outliers(N, D, L, C, k=N_OUTLIERS):
+    keep = L < np.sort(L)[-k]
+    return N[keep], D[keep], L[keep], C[keep]
 
 # ----------------------------------------------------------------------
-# (1) Full Chinchilla law L(N,D) = E + A/N^a + B/D^b  (Huber, log-domain)
-#     Uses real (N, D, C) jointly.
+# 2. Expansion path in closed form
 # ----------------------------------------------------------------------
-def fit_ND(N, D, L):
-    def resid(t):
-        E, lA, a, lB, b = t
-        p = E + np.exp(lA) * N ** -a + np.exp(lB) * D ** -b
-        return np.log(p) - np.log(L)
-    s = least_squares(resid, [np.log(1.7), np.log(400), 0.34, np.log(400), 0.28],
-                      loss="huber", f_scale=0.01, max_nfev=20000)
-    E, lA, a, lB, b = s.x
-    return dict(E=E, A=np.exp(lA), alpha=a, B=np.exp(lB), beta=b)
-
-def L_ND(n, dd, p):
-    return p["E"] + p["A"] * n ** -p["alpha"] + p["B"] * dd ** -p["beta"]
-
-# ----------------------------------------------------------------------
-# (2) Compute-optimal frontier: for each budget C, N* = argmin_N L(N, C/6N)
-#     [FIX-1] Budgets extend to 1e23 so 2N stays inside the grid for all
-#     N <= 1e10 evaluated downstream (Nf.max ~ 4.6e10 > 2e10).
-# ----------------------------------------------------------------------
-def frontier(p, Cs=None):
-    if Cs is None:
-        Cs = np.logspace(18, 23.5, 90)
-    Nf, Lf = [], []
-    for C in Cs:
-        f = lambda ln: L_ND(10 ** ln, C / (6 * 10 ** ln), p)
-        r = minimize_scalar(f, bounds=(6, 12), method="bounded")
-        Nf.append(10 ** r.x); Lf.append(f(r.x))
-    o = np.argsort(Nf)
-    return np.array(Nf)[o], np.array(Lf)[o]
-
-# ----------------------------------------------------------------------
-# Candidate single-variable forms
-#   [FIX-3] log_model is now EXACTLY the manuscript's form.
-# ----------------------------------------------------------------------
-def log_model(N, c, a, b, E):     # L(N) = c / ln(aN + b) + E  (manuscript form)
-    return c / np.log(a * N + b) + E
-
-def power_law(N, A, beta, E):
-    return A * np.power(N, -beta) + E
-
-LOG_P0 = [20.0, 1e-6, 10.0, 1.5]
-LOG_BOUNDS = ([0, 1e-12, 0, 0.5], [100, 1.0, 1e6, 2.4])
-POW_P0 = [400, 0.34, 1.7]
-
-def gof(f, p, N, L, k):
-    pred = f(N, *p); n = len(L); rss = np.sum((L - pred) ** 2)
-    r2 = 1 - rss / np.sum((L - L.mean()) ** 2)
-    mape = np.mean(np.abs((L - pred) / L)) * 100
-    aic = n * np.log(rss / n) + 2 * k
-    bic = n * np.log(rss / n) + k * np.log(n)
-    return dict(R2=float(r2), MAPE=float(mape), AIC=float(aic), BIC=float(bic))
-
-def loocv_rmse(f, p0, bounds, N, L):
-    """[NEW-1] Leave-one-out CV on real points. Returns RMSE of held-out
-    predictions; np.nan if any refit fails."""
-    errs = []
-    n = len(N)
-    for i in range(n):
-        m = np.ones(n, bool); m[i] = False
+class Path:
+    """Expansion path of  min L(N,D) s.t. 6ND = C, from frozen parameters."""
+    def __init__(self, p):
+        self.A, self.B, self.E = p["A"], p["B"], p["E"]
+        self.al, self.be = p["alpha"], p["beta"]
+        self.a = self.be / (self.al + self.be)          # N ~ C^a
+        self.K = ((self.al * self.A) / (self.be * self.B)) ** (1 / (self.al + self.be))
+    def N(self, C):  return self.K * (C / 6) ** self.a
+    def D(self, C):  return C / (6 * self.N(C))
+    def L(self, C):
+        n = self.N(C)
+        return self.E + self.A * n ** -self.al + self.B * self.D(C) ** -self.be
+    def C_of_N(self, n): return 6 * (n / self.K) ** (1 / self.a)
+    def gain(self, C):                                   # per COMPUTE doubling
+        return (self.L(C) - self.L(2 * C)) / self.L(C)
+    def threshold(self, hurdle, lo=1e15, hi=1e32):
         try:
-            if bounds is None:
-                pi, _ = curve_fit(f, N[m], L[m], p0=p0, maxfev=400000)
-            else:
-                pi, _ = curve_fit(f, N[m], L[m], p0=p0, bounds=bounds, maxfev=400000)
-            errs.append(L[i] - f(N[i], *pi))
-        except Exception:
+            return self.N(brentq(lambda C: self.gain(C) - hurdle, lo, hi))
+        except ValueError:
             return float("nan")
-    return float(np.sqrt(np.mean(np.array(errs) ** 2)))
+    def dC_per_1pct(self, n):
+        C0 = self.C_of_N(n)
+        target = .99 * self.L(C0)
+        return brentq(lambda C: self.L(C) - target, C0, C0 * 1e6) - C0
 
 # ----------------------------------------------------------------------
-# (3) Marginal gain per doubling along the frontier & threshold by hurdle
-#     Interpolation in log10(N) domain; guarded against extrapolation.
+# 3. Empirical envelopes  (compute-matched is the decision-relevant one)
 # ----------------------------------------------------------------------
-def gain_curve(Nf, Lf, ns):
-    lNf = np.log10(Nf)
-    Ls = lambda x: np.interp(np.log10(x), lNf, Lf)
-    g = np.full(len(ns), np.nan)
-    ok = (ns >= Nf.min()) & (2 * ns <= Nf.max())   # [FIX-1] no silent clamping
-    g[ok] = (Ls(ns[ok]) - Ls(2 * ns[ok])) / Ls(ns[ok])
-    return g
+def envelope(x, L, nbands=15, min_per_band=2):
+    lx = np.log10(x)
+    edges = np.linspace(lx.min(), lx.max(), nbands + 1)
+    idx = np.clip(np.digitize(lx, edges) - 1, 0, nbands - 1)
+    rows = []
+    for b in range(nbands):
+        m = idx == b
+        if m.sum() >= min_per_band:
+            j = np.argmin(L[m])
+            rows.append((x[m][j], L[m][j]))
+    return np.array([r[0] for r in rows]), np.array([r[1] for r in rows])
 
-def threshold(ns, g, hurdle):
-    valid = ~np.isnan(g)
-    ix = np.where(valid & (g < hurdle))[0]
-    return float(ns[ix[0]]) if len(ix) else float("nan")
+f_pow = lambda x, A, b, E: A * x ** -b + E
+f_log = lambda x, k, a, b, E: k / np.log(a * x + b) + E
+P0_POW_C, P0_LOG_C = [50, .05, 1.8], [20, 1e-19, 1, 1.5]
+BND_LOG_C = ([0, 1e-25, 0, .5], [500, 1, 1e6, 2.4])
+P0_POW_N, P0_LOG_N = [400, .34, 1.7], [20, 1e-6, 10, 1.5]
+BND_LOG_N = ([0, 1e-12, 0, .5], [100, 1, 1e6, 2.4])
+
+def gof(f, p, x, y, k):
+    pred = f(x, *p); rss = np.sum((y - pred) ** 2); n = len(y)
+    return dict(R2=float(1 - rss / np.sum((y - y.mean()) ** 2)),
+                MAPE=float(np.mean(np.abs((y - pred) / y)) * 100),
+                AIC=float(n * np.log(rss / n) + 2 * k))
+
+def loocv(f, p0, bounds, x, y):
+    err = []
+    for i in range(len(x)):
+        m = np.ones(len(x), bool); m[i] = False
+        kw = dict(bounds=bounds) if bounds else {}
+        pi, _ = curve_fit(f, x[m], y[m], p0=p0, maxfev=800000, **kw)
+        err.append(y[i] - f(x[i], *pi))
+    return float(np.sqrt(np.mean(np.array(err) ** 2)))
+
+def compare_forms(x, y, p0p, p0l, bndl):
+    pp, _ = curve_fit(f_pow, x, y, p0=p0p, maxfev=800000)
+    pl, _ = curve_fit(f_log, x, y, p0=p0l, bounds=bndl, maxfev=800000)
+    return dict(
+        n=int(len(x)),
+        power=dict(**gof(f_pow, pp, x, y, 3), LOOCV=loocv(f_pow, p0p, None, x, y),
+                   params=[float(v) for v in pp]),
+        log=dict(**gof(f_log, pl, x, y, 4), LOOCV=loocv(f_log, p0l, bndl, x, y),
+                 params=[float(v) for v in pl]))
+
+# ----------------------------------------------------------------------
+# 4. Three-way decomposition of the resource gap
+# ----------------------------------------------------------------------
+# Illustrative economic and energy parameters. These are scenario inputs, not
+# measurements: the compute price is an order-of-magnitude figure from public
+# cloud pricing, the energy per FLOP is representative of current accelerators,
+# and the grid intensity is a national average (Ember, 2025).
+C_COMPUTE = 3e-18      # $/FLOP. Constructed scenario, not a market survey.
+                       # 2 $/h at a peak 1e15 FLOP/s is 5.6e-19 $/FLOP if every
+                       # peak operation were useful. Model FLOPs utilisation of
+                       # order 40% multiplies this by ~2.5; storage, interconnect,
+                       # checkpointing and abandoned runs contribute a further ~2x.
+                       # 3e-18 is therefore ~5.4x the peak-rate figure. Each factor
+                       # is an assumption; vary this constant to test others.
+P_CO2     = 80.0       # $/tCO2e
+E_FLOP    = 2e-12      # J/FLOP
+PUE       = 1.2        # dimensionless
+CI_GRID   = 400.0      # g CO2e/kWh
+
+LANDAUER_J_PER_BIT = 2.87e-21     # kT ln2 at T = 300 K (reported, not used in the paper)
+
+def _excess_ratios(path, L, C, C_lo, C_hi):
+    """Realised compute over the compute the path needs for the same loss.
+    Points whose implied optimum falls outside the observed budget range are
+    dropped: inverting the law there would extrapolate."""
+    keep, dropped = [], 0
+    for c, l in zip(C, L):
+        if l <= path.E:
+            dropped += 1; continue
+        try:
+            c_opt = brentq(lambda x: path.L(x) - l, 1e14, 1e30)
+        except ValueError:
+            dropped += 1; continue
+        if not (C_lo / 10 <= c_opt <= C_hi * 10):
+            dropped += 1; continue
+        keep.append(c / c_opt)
+    return np.array(keep), dropped
+
+def _summary(r, dropped):
+    return dict(n=int(len(r)), dropped=int(dropped), median=float(np.median(r)),
+                p90=float(np.percentile(r, 90)), max=float(r.max()),
+                share_above_2x=float(np.mean(r > 2)))
+
+def sample_composition(path, L, C, k=N_OUTLIERS):
+    """Which observations each sample drops, and how the two rules overlap."""
+    C_lo, C_hi = C.min(), C.max()
+    domain_excluded = []
+    for i, (c, l) in enumerate(zip(C, L)):
+        if l <= path.E:
+            domain_excluded.append(i); continue
+        try:
+            c_opt = brentq(lambda x: path.L(x) - l, 1e14, 1e30)
+        except ValueError:
+            domain_excluded.append(i); continue
+        if not (C_lo / 10 <= c_opt <= C_hi * 10):
+            domain_excluded.append(i)
+    high_loss = sorted(int(i) for i in np.argsort(L)[-k:])
+    overlap = sorted(set(domain_excluded) & set(high_loss))
+    return dict(
+        n_total=int(len(L)),
+        domain_excluded=dict(indices=[int(i) for i in domain_excluded],
+                             losses=[float(L[i]) for i in domain_excluded]),
+        high_loss_excluded=dict(indices=high_loss, losses=[float(L[i]) for i in high_loss]),
+        overlap_indices=overlap,
+        n_row1=int(len(L) - len(domain_excluded)),
+        n_row2=int(len(L) - len(set(domain_excluded) | set(high_loss))),
+        note=("Row 1 drops only the domain exclusions. Row 2 drops the union of the "
+              "domain exclusions and the five highest-loss points; the overlap is why "
+              "removing five points reduces the count by three."))
+
+def decomposition(path, N, L, C, L_fit, C_fit, e_flop=2e-12, bits_per_flop=16):
+    C_lo, C_hi = C.min(), C.max()
+    r_all, d_all = _excess_ratios(path, L, C, C_lo, C_hi)
+    r_fit, d_fit = _excess_ratios(path, L_fit, C_fit, C_lo, C_hi)
+    return dict(
+        geometry_exponent=float(1 / path.a),
+        allocation=dict(**_summary(r_all, d_all),
+                        sensitivity=dict(
+                            full_sample=_summary(r_all, d_all),
+                            excluding_5_high_loss=_summary(r_fit, d_fit))),
+        hardware_gap_not_reported=("Converting a floor on irreversible bit erasure "
+            "into a bound per floating-point operation requires assumptions about "
+            "erasures per operation that are not justified here; no result depends "
+            "on this quantity."),
+        note=("Geometry is a property of the production function and is not "
+              "addressable by hardware. Allocation is the distance from the "
+              "expansion path and is closed by budget balancing. The hardware "
+              "gap to the Landauer bound closes only with a change of substrate."))
+
+# ----------------------------------------------------------------------
+# 5. Robustness
+# ----------------------------------------------------------------------
+def monte_carlo(N, D, L, p_start, hurdle=0.04, noises=(0.01, 0.02, 0.05), reps=800):
+    rng = np.random.default_rng(RNG_MC)
+    out = {}
+    for s in noises:
+        vals = []
+        for _ in range(reps):
+            Lp = L * (1 + rng.normal(0, s, len(L)))
+            p, _ = fit_source_protocol(N, D, Lp, grid_search=False, p0=p_start)
+            t = Path(p).threshold(hurdle)
+            if np.isfinite(t):
+                vals.append(np.log10(t))
+        v = np.array(vals)
+        out[f"{int(s*100)}%"] = dict(median=float(10 ** np.median(v)),
+            ci=[float(10 ** np.percentile(v, 2.5)), float(10 ** np.percentile(v, 97.5))],
+            n=int(len(v)))
+    return out
+
+def bootstrap(N, D, L, p_start, reps=1000):
+    rng = np.random.default_rng(RNG_BOOT)
+    keys = ["A", "B", "E", "alpha", "beta"]
+    acc = {k: [] for k in keys}; acc["a"] = []
+    for _ in range(reps):
+        i = rng.choice(len(N), len(N), replace=True)
+        p, _ = fit_source_protocol(N[i], D[i], L[i], grid_search=False, p0=p_start)
+        for k in keys:
+            acc[k].append(p[k])
+        acc["a"].append(p["beta"] / (p["alpha"] + p["beta"]))
+    return {k: [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]
+            for k, v in acc.items()}
+
+# ----------------------------------------------------------------------
+# 6. Figures
+# ----------------------------------------------------------------------
+def figures(path, N, L, C, envC, envL, cmp_C, hurdles, res):
+    os.makedirs(OUT_FIG, exist_ok=True)
+    plt.rcParams.update({"font.size": 9, "figure.dpi": 300})
+    Nmin, Nmax = N.min(), N.max()
+    ns = np.logspace(np.log10(Nmin), np.log10(Nmax), 300)
+
+    # Fig 1: cloud + path
+    plt.figure(figsize=(6.4, 4.4))
+    plt.scatter(N, L, s=9, alpha=.22, color=MUT, label=f"Observations (n={len(N)})")
+    plt.plot(ns, [path.L(path.C_of_N(x)) for x in ns], lw=2.4, color=INK,
+             label="Expansion path $L^*(N)$")
+    plt.xscale("log"); plt.xlabel("Model parameters $N$"); plt.ylabel("Validation loss")
+    plt.title("Validation loss versus model size"); plt.legend(fontsize=7.6)
+    plt.tight_layout(); plt.savefig(OUT_FIG + "fig1_path.png"); plt.close()
+
+    # Fig 2: marginal gain per compute doubling
+    plt.figure(figsize=(6.4, 4.4))
+    nn = np.logspace(7.3, 10.6, 400)
+    plt.plot(nn, [path.gain(path.C_of_N(x)) * 100 for x in nn], lw=2.4, color=INK)
+    for h in hurdles:
+        plt.axhline(h * 100, ls="--" if h == .04 else ":", lw=1.1,
+                    color=SIG if h == .04 else "#b9b9b9")
+    plt.axvspan(nn[0], Nmin, color="#f3f0e6", zorder=0)
+    plt.axvspan(Nmax, nn[-1], color="#f3f0e6", zorder=0)
+    plt.xscale("log"); plt.ylim(0, 9)
+    plt.xlabel("Model parameters $N$")
+    plt.ylabel("Marginal loss reduction per compute doubling (%)")
+    plt.title("Diminishing marginal returns along the expansion path")
+    plt.tight_layout(); plt.savefig(OUT_FIG + "fig2_gain.png"); plt.close()
+
+    # Fig 3: threshold as a function of the hurdle
+    hs = np.linspace(.012, .08, 40)
+    ts = [path.threshold(h) for h in hs]
+    plt.figure(figsize=(6.4, 4.4))
+    plt.plot(hs * 100, ts, "-o", ms=3.4, color=INK)
+    plt.axhspan(Nmin, Nmax, color="#eef3ea", zorder=0, label="Observed range")
+    plt.yscale("log"); plt.xlabel("Marginal performance hurdle $r$ (%)")
+    plt.ylabel("Efficiency threshold $N^*(r)$")
+    plt.title("The threshold is a function of the organizational hurdle")
+    plt.legend(fontsize=7.6)
+    plt.tight_layout(); plt.savefig(OUT_FIG + "fig3_threshold.png"); plt.close()
+
+    # Fig 4: dC per 1%
+    plt.figure(figsize=(6.4, 4.4))
+    n2 = np.logspace(8, 10.2, 200)
+    plt.plot(n2, [path.dC_per_1pct(x) for x in n2], lw=2.4, color=INK)
+    plt.axvspan(n2[0], Nmin, color="#f3f0e6", zorder=0)
+    plt.axvspan(Nmax, n2[-1], color="#f3f0e6", zorder=0)
+    plt.xscale("log"); plt.yscale("log")
+    plt.xlabel("Model parameters $N$"); plt.ylabel(r"$\Delta C$ per 1% loss reduction (FLOP)")
+    plt.title("Marginal compute per unit of performance")
+    plt.tight_layout(); plt.savefig(OUT_FIG + "fig4_cost.png"); plt.close()
+
+    # Fig 4b: Monte Carlo robustness (kept with the others so every figure in the
+    # paper comes from this pipeline)
+    mc = res["monte_carlo_4pct"]; det = res["thresholds"]["4%"]["N"]
+    plt.figure(figsize=(6.4, 3.6))
+    lv, pos = ["1%", "2%", "5%"], [1, 2, 3]
+    for i, k in enumerate(lv):
+        m = mc[k]
+        plt.plot([m["ci"][0], m["ci"][1]], [pos[i]] * 2, lw=3, color=INK,
+                 solid_capstyle="round")
+        plt.plot([m["median"]], [pos[i]], "o", ms=8, color=SIG, zorder=5)
+    plt.axvline(det, color=OK, lw=1.6, ls="--",
+                label=f"deterministic $N^*$ = {det:.2e}")
+    plt.yticks(pos, [f"±{k} loss noise" for k in lv]); plt.xscale("log")
+    plt.xlabel("Threshold $N^*$ at $r=4\\%$")
+    plt.title("Robustness: perturbation magnitude as a sensitivity parameter")
+    plt.legend(fontsize=7.5); plt.tight_layout()
+    plt.savefig(OUT_FIG + "fig_mc.png"); plt.close()
+
+    # Fig 5: VALIDATION + functional form on the decision-relevant object
+    pp = cmp_C["power"]["params"]; pl = cmp_C["log"]["params"]
+    cs = np.logspace(np.log10(envC.min()), np.log10(envC.max()), 200)
+    fig, ax = plt.subplots(1, 2, figsize=(9.6, 4.0))
+    ax[0].scatter(C, L, s=8, alpha=.18, color=MUT, label=f"Observations (n={len(C)})")
+    ax[0].plot(cs, [path.L(c) for c in cs], lw=2.4, color=INK, label="Fitted path $L^*(C)$")
+    ax[0].scatter(envC, envL, s=34, color=OK, marker="D", zorder=5,
+                  label=f"Compute-matched envelope (n={len(envC)})")
+    ax[0].set_xscale("log"); ax[0].set_xlabel("Training compute $C$ (FLOP)")
+    ax[0].set_ylabel("Validation loss")
+    ax[0].set_title("Model path against the empirical envelope"); ax[0].legend(fontsize=7.2)
+    ax[1].scatter(envC, envL, s=34, color=OK, marker="D", zorder=5, label="Envelope")
+    ax[1].plot(cs, f_pow(cs, *pp), lw=2.2, color=INK,
+               label=f"Power law ($R^2$={cmp_C['power']['R2']:.3f}, LOOCV {cmp_C['power']['LOOCV']:.3f})")
+    ax[1].plot(cs, f_log(cs, *pl), "--", lw=2.2, color=ALT,
+               label=f"Reciprocal-log ($R^2$={cmp_C['log']['R2']:.3f}, LOOCV {cmp_C['log']['LOOCV']:.3f})")
+    ax[1].set_xscale("log"); ax[1].set_xlabel("Training compute $C$ (FLOP)")
+    ax[1].set_ylabel("Validation loss")
+    ax[1].set_title("Functional form on the decision-relevant object"); ax[1].legend(fontsize=7.2)
+    plt.tight_layout(); plt.savefig(OUT_FIG + "fig5_validation.png"); plt.close()
 
 # ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
 def main():
-    for d in (OUT_FIG, OUT_RES):
-        os.makedirs(d, exist_ok=True)
-    N, D, L = load()
-    N_obs_min, N_obs_max = float(N.min()), float(N.max())
-    p = fit_ND(N, D, L)
-    predND = L_ND(N, D, p)
-    p["R2"] = float(1 - np.sum((L - predND) ** 2) / np.sum((L - L.mean()) ** 2))
+    os.makedirs(OUT_RES, exist_ok=True)
+    N_all, D_all, L_all, C_all = load()
+    N, D, L, C = drop_outliers(N_all, D_all, L_all, C_all)
 
-    Nf, Lf = frontier(p)
-    ns = np.logspace(8, 10.7, 500)
-    g = gain_curve(Nf, Lf, ns)
+    # --- estimate and FREEZE -------------------------------------------------
+    frozen, raw = fit_source_protocol(N, D, L, grid_search=True)
+    frozen, raw = fit_source_protocol(N, D, L, grid_search=False, p0=raw)   # refine
+    path = Path(frozen)
+    published = dict(A=482.01, B=2085.43, E=1.8172, alpha=0.3478, beta=0.3658)
 
-    hurdles = [0.02, 0.04, 0.06, 0.08]
-    th = {}
+    # --- decision quantities -------------------------------------------------
+    hurdles = [0.04, 0.03, 0.02, 0.01]
+    thresholds = {}
     for h in hurdles:
-        t = threshold(ns, g, h)
-        th[f"{int(h*100)}%"] = dict(
-            N=t,
-            log10N=float(np.log10(t)) if not np.isnan(t) else float("nan"),
-            within_observed_range=bool(N_obs_min <= t <= N_obs_max)  # [FIX-2]
-        )
+        t = path.threshold(h)
+        thresholds[f"{int(h*100)}%"] = dict(
+            N=float(t), log10N=float(np.log10(t)) if np.isfinite(t) else None,
+            status=("interpolated" if N_all.min() <= t <= N_all.max()
+                    else "extrapolated_below" if t < N_all.min() else "extrapolated_above"))
+    gains = {f"{n:.0e}": float(path.gain(path.C_of_N(n)))
+             for n in [1e8, 3e8, 1e9, 3e9, 1e10]}
+    dC = {f"{n:.0e}": float(path.dC_per_1pct(n)) for n in [1e8, 1e9, 1e10]}
 
-    # --- single-variable fits to the MODEL-DERIVED frontier (labelled) ------
-    pl, cov_l = curve_fit(log_model, Nf, Lf, p0=LOG_P0, bounds=LOG_BOUNDS,
-                          maxfev=400000)
-    pp, cov_p = curve_fit(power_law, Nf, Lf, p0=POW_P0, maxfev=400000)
-    se_l = np.sqrt(np.diag(cov_l))
-    g_log = gof(log_model, pl, Nf, Lf, 4)
-    g_pow = gof(power_law, pp, Nf, Lf, 3)
+    # --- empirical validation: compute-matched envelope ----------------------
+    envC, envL = envelope(C_all, L_all, nbands=15)   # full sample: outliers are high-loss
+    cmp_C = compare_forms(envC, envL, P0_POW_C, P0_LOG_C, BND_LOG_C)
+    ppC = cmp_C["power"]["params"]
+    gain_env = lambda c: (f_pow(c, *ppC) - f_pow(2 * c, *ppC)) / f_pow(c, *ppC)
+    validation = {}
+    for h in [0.04, 0.03, 0.02]:
+        c_emp = brentq(lambda c: gain_env(c) - h, 1e15, 1e32)
+        c_mod = path.C_of_N(path.threshold(h))
+        # The comparison in COMPUTE is the independent one. Translating to model
+        # size uses the path's own budget-to-size map, which compresses the
+        # discrepancy by the frontier elasticity and overstates the agreement.
+        validation[f"{int(h*100)}%"] = dict(
+            compute_model=float(c_mod), compute_empirical=float(c_emp),
+            compute_ratio=float(c_mod / c_emp),
+            size_model=float(path.N(c_mod)), size_empirical=float(path.N(c_emp)),
+            size_ratio=float(path.N(c_mod) / path.N(c_emp)))
 
-    # --- [NEW-1] non-circular comparison on the 15 EMPIRICAL frontier points -
-    Ne, Le = load_empirical_frontier()
-    ple, _ = curve_fit(log_model, Ne, Le, p0=LOG_P0, bounds=LOG_BOUNDS,
-                       maxfev=400000)
-    ppe, _ = curve_fit(power_law, Ne, Le, p0=POW_P0, maxfev=400000)
-    emp = dict(
-        n_points=int(len(Ne)),
-        log_fit=dict(params=dict(c=float(ple[0]), a=float(ple[1]),
-                                 b=float(ple[2]), E=float(ple[3])),
-                     **gof(log_model, ple, Ne, Le, 4),
-                     LOOCV_RMSE=loocv_rmse(log_model, LOG_P0, LOG_BOUNDS, Ne, Le)),
-        power_fit=dict(params=dict(A=float(ppe[0]), beta=float(ppe[1]),
-                                   E=float(ppe[2])),
-                       **gof(power_law, ppe, Ne, Le, 3),
-                       LOOCV_RMSE=loocv_rmse(power_law, POW_P0, None, Ne, Le)),
-        note=("Fits and LOOCV on the 15 real envelope points. This is the "
-              "non-circular comparison; the fit to the model-derived frontier "
-              "below is near-exact for the power law BY CONSTRUCTION."))
+    # --- methodological finding: the wrong object hides the difference -------
+    envN, envLN = envelope(N_all, L_all, nbands=15)
+    cmp_N = compare_forms(envN, envLN, P0_POW_N, P0_LOG_N, BND_LOG_N)
 
-    # --- (4) Monte Carlo: +/-2% loss noise -> refit L(N,D) -> threshold@4% ---
-    mc = []
-    for _ in range(800):
-        Lp = L * (1 + RNG.normal(0, 0.02, len(L)))
+    # --- correspondence between the elasticity hurdle and the monetary rule ---
+    # For a fixed price and loss function, each hurdle selects a scale; evaluating
+    # V1* = c_eff * dC at that scale gives the value of a 1% improvement that an
+    # organization adopting the hurdle is implicitly assuming. This reproduces the
+    # same stopping point; it does not identify the organization's actual
+    # preference.
+    c_eff = C_COMPUTE + P_CO2 / 1e6 * E_FLOP / 3.6e6 * PUE * CI_GRID
+    correspondence = {}
+    for h in [0.04, 0.03, 0.02]:
+        n = path.threshold(h)
+        dc = path.dC_per_1pct(n)
+        correspondence[f"{int(h*100)}%"] = dict(
+            N_star=float(n), dC=float(dc), V1_star=float(c_eff * dc))
+
+    # --- sensitivity of the envelope to the number of bands ------------------
+    band_sensitivity = {}
+    for nb in [10, 12, 15, 20, 25]:
         try:
-            p2 = fit_ND(N, D, Lp)
-            nf, lf = frontier(p2)
-            gg = gain_curve(nf, lf, ns)
-            t = threshold(ns, gg, 0.04)
-            if not np.isnan(t):
-                mc.append(np.log10(t))
-        except Exception:
-            pass
-    mc = np.array(mc)
-    det_log10 = th["4%"]["log10N"]
-    mc_summary = dict(
-        median=float(np.median(mc)),
-        ci_low=float(np.percentile(mc, 2.5)),
-        ci_high=float(np.percentile(mc, 97.5)),
-        n_valid=int(len(mc)),
-        deterministic_log10=det_log10,
-        # [NEW-2] the deterministic value need not equal the MC median:
-        # the threshold is a nonlinear functional of the refitted law, so
-        # symmetric loss noise produces a slightly asymmetric (downward-
-        # shifted) threshold distribution.
-        median_minus_deterministic=float(np.median(mc) - det_log10))
+            eC, eL = envelope(C_all, L_all, nbands=nb)
+            cmp_nb = compare_forms(eC, eL, P0_POW_C, P0_LOG_C, BND_LOG_C)
+            pnb = cmp_nb["power"]["params"]
+            g_nb = lambda c: ((f_pow(c, *pnb) - f_pow(2 * c, *pnb)) / f_pow(c, *pnb))
+            c_emp4 = brentq(lambda c: g_nb(c) - 0.04, 1e15, 1e32)
+            band_sensitivity[str(nb)] = dict(
+                n_points=int(len(eC)),
+                power_LOOCV=cmp_nb["power"]["LOOCV"], log_LOOCV=cmp_nb["log"]["LOOCV"],
+                power_preferred=bool(cmp_nb["power"]["LOOCV"] < cmp_nb["log"]["LOOCV"]),
+                compute_ratio_4pct=float(path.C_of_N(path.threshold(0.04)) / c_emp4))
+        except Exception as exc:
+            band_sensitivity[str(nb)] = dict(error=str(exc))
+
+    # --- decomposition, robustness ------------------------------------------
+    decomp = decomposition(path, N_all, L_all, C_all, L, C)
+    mc = monte_carlo(N, D, L, raw)
+    boot = bootstrap(N, D, L, raw)
 
     results = dict(
-        L_ND=p,
-        observed_N_range=[N_obs_min, N_obs_max],
-        threshold_by_hurdle=th,
-        gain_at_1e9=float(np.interp(np.log10(1e9), np.log10(ns), g)),
-        gain_at_1e10=float(np.interp(np.log10(1e10), np.log10(ns), g)),
-        frontier_loss={f"1e{int(np.log10(x))}":
-                       float(np.interp(np.log10(x), np.log10(Nf), Lf))
-                       for x in [1e8, 1e9, 1e10]},
-        model_derived_frontier_fits=dict(
-            log_fit=dict(params=dict(c=float(pl[0]), a=float(pl[1]),
-                                     b=float(pl[2]), E=float(pl[3])),
-                         param_SE=dict(c=float(se_l[0]), a=float(se_l[1]),
-                                       b=float(se_l[2]), E=float(se_l[3])),
-                         identifiability_note=(
-                             "b is unidentifiable over this range "
-                             "(SE(b) >> |b|); aN >> b for all observed N, so "
-                             "the form degenerates to c/ln(aN)+E. Reported "
-                             "for transparency."),
-                         **g_log),
-            power_fit=dict(params=dict(A=float(pp[0]), beta=float(pp[1]),
-                                       E=float(pp[2])), **g_pow),
-            note=("Fitted to 80 model-derived frontier points. The power "
-                  "law's near-perfect fit here is expected by construction "
-                  "and is NOT evidence of empirical superiority; see "
-                  "empirical_frontier_fits for the non-circular test.")),
-        empirical_frontier_fits=emp,
-        monte_carlo_threshold_4pct=mc_summary)
+        frozen_parameters=frozen,
+        published_reference=published,
+        parameter_deviation_pct={k: float(100 * (frozen[k] - published[k]) / published[k])
+                                 for k in published},
+        frontier_elasticity_a=float(path.a),
+        compute_exponent=float(1 / path.a),
+        N_doubling_compute_factor=float(2 ** (1 / path.a)),
+        observed_N_range=[float(N_all.min()), float(N_all.max())],
+        gains_per_compute_doubling=gains,
+        thresholds=thresholds,
+        dC_per_1pct=dC,
+        empirical_validation=dict(
+            envelope_compute_matched=cmp_C,
+            thresholds_model_vs_empirical=validation,
+            envelope_by_model_size=cmp_N,
+            note=("The compute-matched envelope is the empirical counterpart of a "
+                  "locus derived under a budget constraint and is the object the "
+                  "decision is made against, and agreement is reported in compute because the "
+                  "translation to model size borrows the map being checked. On it the power law is decisively "
+                  "preferred. On an envelope defined over model size the two forms "
+                  "appear statistically indistinguishable; that comparison is not "
+                  "decision-relevant and should not be used to license extrapolation.")),
+        economic_parameters=dict(c_compute=C_COMPUTE, p_CO2=P_CO2, e_flop=E_FLOP,
+                                 PUE=PUE, CI_grid=CI_GRID, c_eff=float(c_eff),
+                                 note="Scenario inputs, not measurements; see source comments."),
+        hurdle_value_correspondence=correspondence,
+        envelope_band_sensitivity=band_sensitivity,
+        sample_composition=sample_composition(path, L_all, C_all),
+        decomposition=decomp,
+        monte_carlo_4pct=mc,
+        bootstrap_CI95=boot)
 
     with open(OUT_RES + "results.json", "w") as f:
         json.dump(results, f, indent=2)
+    pd.DataFrame([dict(N=n, C=path.C_of_N(n), L=path.L(path.C_of_N(n)),
+                       gain=path.gain(path.C_of_N(n)))
+                  for n in [1e8, 3e8, 1e9, 3e9, 1e10]]).to_csv(
+        OUT_RES + "table_marginal_returns.csv", index=False)
+    pd.DataFrame(dict(C=envC, loss=envL)).to_csv(
+        OUT_RES + "envelope_compute_matched.csv", index=False)
+    _r, _d = _excess_ratios(path, L_all, C_all, C_all.min(), C_all.max())
+    pd.DataFrame(dict(excess_compute_ratio=_r)).to_csv(
+        OUT_RES + "excess_compute_ratios.csv", index=False)
 
-    # corrected Table 1 (regime structure) from the frontier
-    rows = []
-    for a_, b_ in [(1e8, 2e8), (2e8, 5e8), (5e8, 1e9), (1e9, 2e9),
-                   (2e9, 5e9), (5e9, 1e10), (1e10, 2e10)]:
-        lNf = np.log10(Nf)
-        Ls = lambda x: np.interp(np.log10(x), lNf, Lf)
-        gn = (Ls(a_) - Ls(b_)) / Ls(a_)
-        rows.append(dict(N_from=a_, N_to=b_, L_from=float(Ls(a_)),
-                         gain_pct=round(gn * 100, 2)))
-    pd.DataFrame(rows).to_csv(OUT_RES + "table1_corrected.csv", index=False)
-
-    _figures(N, L, Nf, Lf, ns, g, pl, pp, th, mc, N_obs_max)
+    figures(path, N_all, L_all, C_all, envC, envL, cmp_C, hurdles, results)
     print(json.dumps(results, indent=2))
-
-def _figures(N, L, Nf, Lf, ns, g, pl, pp, th, mc, N_obs_max):
-    inrange = Nf <= N_obs_max
-
-    # Fig 1: data + frontier + fits
-    plt.figure(figsize=(7, 5))
-    plt.scatter(N, L, s=10, alpha=.25, color="#888",
-                label="Reconstructed points (n=245)")
-    plt.plot(Nf[inrange], Lf[inrange], lw=2.5, color="#1f3b73",
-             label="Compute-optimal frontier  L*(N)")
-    plt.plot(Nf[inrange], log_model(Nf[inrange], *pl), "--", color="#c0392b",
-             lw=1.8, label="Log saturation fit")
-    plt.plot(Nf[inrange], power_law(Nf[inrange], *pp), ":", color="#27733b",
-             lw=1.8, label="Power-law fit")
-    plt.xscale("log"); plt.xlabel("Model parameters N")
-    plt.ylabel("Validation loss")
-    plt.title("Validation loss vs. model size (Chinchilla reconstruction)")
-    plt.legend(fontsize=8); plt.tight_layout()
-    plt.savefig(OUT_FIG + "fig1_fit.png", dpi=160); plt.close()
-
-    # Fig 2: marginal gain + hurdle band
-    plt.figure(figsize=(7, 5))
-    plt.plot(ns, g * 100, lw=2.2, color="#1f3b73")
-    for h, c in zip([0.02, 0.04, 0.06, 0.08],
-                    ["#bbb", "#c0392b", "#999", "#bbb"]):
-        plt.axhline(h * 100, ls="--", lw=1, color=c)
-        t = th[f"{int(h*100)}%"]["N"]
-        if not np.isnan(t):
-            plt.axvline(t, ls=":", lw=.8, color=c)
-    plt.axvline(N_obs_max, color="#333", lw=1.2, ls="-.",
-                label="max observed N (beyond: extrapolation)")
-    plt.xscale("log"); plt.xlabel("Model parameters N")
-    plt.ylabel("Marginal loss reduction per compute doubling (%)")
-    plt.title("Efficiency frontier: diminishing marginal gains")
-    plt.legend(fontsize=8); plt.tight_layout()
-    plt.savefig(OUT_FIG + "fig2_marginal_gain.png", dpi=160); plt.close()
-
-    # Fig 3: Monte Carlo threshold distribution
-    plt.figure(figsize=(7, 5))
-    plt.hist(mc, bins=30, color="#1f3b73", alpha=.8)
-    plt.axvline(np.median(mc), color="#c0392b", lw=2,
-                label=f"median ≈ 10^{np.median(mc):.2f}")
-    plt.axvline(th["4%"]["log10N"], color="#27733b", lw=2, ls="--",
-                label=f"deterministic ≈ 10^{th['4%']['log10N']:.2f}")
-    plt.xlabel("log10(threshold N*) at 4% hurdle"); plt.ylabel("Frequency")
-    plt.title("Monte Carlo robustness (±2% loss noise, 800 runs)")
-    plt.legend(fontsize=9); plt.tight_layout()
-    plt.savefig(OUT_FIG + "fig3_montecarlo.png", dpi=160); plt.close()
-
-    # Fig 4: threshold sensitivity to hurdle
-    hs = np.linspace(0.02, 0.08, 25)
-    Ts = np.array([threshold(ns, g, h) for h in hs])
-    plt.figure(figsize=(7, 5))
-    plt.plot(hs * 100, Ts, "-o", color="#1f3b73", ms=4)
-    plt.axhline(N_obs_max, color="#c0392b", lw=1.2, ls="--",
-                label="max observed N (above: extrapolation)")
-    plt.yscale("log"); plt.xlabel("Hurdle rate (%)")
-    plt.ylabel("Efficiency threshold N*")
-    plt.title("Threshold is hurdle-dependent (the dominant source of variation)")
-    plt.legend(fontsize=9); plt.tight_layout()
-    plt.savefig(OUT_FIG + "fig4_hurdle_sensitivity.png", dpi=160); plt.close()
 
 if __name__ == "__main__":
     main()
