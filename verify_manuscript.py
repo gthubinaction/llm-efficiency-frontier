@@ -153,7 +153,7 @@ def main(doc_path, results_path):
     ec = R["empirical_validation"]["envelope_compute_matched"]
     check_value(rep, text, "power LOOCV", r"leave-one-out RMSE of ([\d.]+)",
                 ec["power"]["LOOCV"], tol=0.05)
-    check_value(rep, text, "log LOOCV", r"LOOCV RMSE (0\.1\d+)\)", ec["log"]["LOOCV"], tol=0.05)
+    check_value(rep, text, "log LOOCV", r"LOOCV RMSE (0\.10\d+)\)", ec["log"]["LOOCV"], tol=0.05)
     check_value(rep, text, "power R2 on envelope", r"attains R2 = (0\.99\d)", ec["power"]["R2"], tol=0.005)
     dAIC = ec["log"]["AIC"] - ec["power"]["AIC"]
     check_value(rep, text, "delta AIC", r"ΔAIC ≈ (\d+)", dAIC, tol=0.05)
@@ -176,7 +176,7 @@ def main(doc_path, results_path):
                  "replication is close, not exact to three decimals")
     check_absent(rep, text, "bracket language", r"bracketing of extrapolation|extrapolation bracket",
                  "the bracket was withdrawn; title and text must not reintroduce it")
-    check_absent(rep, text, "stale LOOCV", r"0\.173",
+    check_absent(rep, text, "stale LOOCV", r"0\.173|0\.155|elevenfold|twelvefold",
                  "superseded by the pipeline value")
     check_absent(rep, text, "unsupported cost claim", r"cheaper per unit of performance",
                  "alternatives' costs and performance were not compared")

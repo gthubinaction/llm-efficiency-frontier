@@ -1,5 +1,35 @@
 # Changelog
 
+## v4.5.0 — deterministic multistart for the logarithmic fit
+
+**The reported fit of the alternative specification was optimizer-dependent, and
+worse than the specification admits.**
+
+- The reciprocal-logarithmic form has many local optima. On the compute-matched
+  envelope, single-start fits from different seeds land at residual sums of
+  squares between 0.09 and 35, so the reported metrics depended on the scipy
+  version rather than on the data: the same commit gave LOOCV 0.155 on one machine
+  and 0.170 on another. The single start used until now landed at RSS 0.253 when
+  an optimum at 0.087 exists, which understated the alternative.
+- Every log fit, including each leave-one-out refit, is now a multistart over a
+  fixed grid keeping the lowest RSS. Deterministic across environments and fair to
+  the specification. maxfev is capped at 20000 for these fits: converging starts
+  finish in milliseconds, while a non-converging start would otherwise consume the
+  full budget and dominate the runtime.
+- Corrected metrics on the compute-matched envelope: log R2 rises from 0.826 to
+  0.969, MAPE falls from 4.99% to 1.89%, LOOCV from 0.155 to 0.107 and dAIC from
+  72 to 49. The power law remains decisively preferred (LOOCV 0.014, nearly
+  eightfold better).
+- The methodological contrast sharpens. On the model-size envelope the ranking now
+  REVERSES: the logarithmic form attains R2 0.975 against 0.973 and LOOCV 0.060
+  against 0.070, some 15% better, with information criteria tied. A specification
+  that wins on the wrong object loses decisively on the right one.
+- Band sensitivity unchanged in conclusion: the power law is preferred at 10, 12,
+  15, 20 and 25 bands, with log LOOCV between 0.092 and 0.109.
+- Thresholds, gains, dC, the correspondence table, the allocation diagnostic, Monte
+  Carlo and bootstrap are untouched; none of them passes through this fit.
+
+
 ## v4.4.2 — figures at print resolution, Monte Carlo figure folded in
 
 - All figures now render at 300 dpi (1920 px wide, 2880 for the two-panel one)

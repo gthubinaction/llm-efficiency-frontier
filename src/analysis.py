@@ -155,23 +155,56 @@ def gof(f, p, x, y, k):
                 MAPE=float(np.mean(np.abs((y - pred) / y)) * 100),
                 AIC=float(n * np.log(rss / n) + 2 * k))
 
-def loocv(f, p0, bounds, x, y):
+def loocv(f, p0, bounds, x, y, log_starts=None):
+    """Leave-one-out RMSE. For the log form the refit is multistart, so the
+    cross-validation is not contaminated by the optimizer landing in different
+    local optima on different folds."""
     err = []
     for i in range(len(x)):
         m = np.ones(len(x), bool); m[i] = False
-        kw = dict(bounds=bounds) if bounds else {}
-        pi, _ = curve_fit(f, x[m], y[m], p0=p0, maxfev=800000, **kw)
+        if log_starts is not None:
+            pi = fit_log_multistart(x[m], y[m], bounds, log_starts)
+        else:
+            kw = dict(bounds=bounds) if bounds else {}
+            pi, _ = curve_fit(f, x[m], y[m], p0=p0, maxfev=800000, **kw)
         err.append(y[i] - f(x[i], *pi))
     return float(np.sqrt(np.mean(np.array(err) ** 2)))
 
-def compare_forms(x, y, p0p, p0l, bndl):
+# The reciprocal-logarithmic form has many local optima: on the compute-matched
+# envelope, single-start fits from different seeds land at residual sums of
+# squares between 0.09 and 35. A single start therefore makes the reported fit
+# depend on the optimizer version rather than on the data, and can also report a
+# worse fit than the form actually admits. Every log fit below is a multistart
+# over a fixed grid, keeping the lowest residual sum of squares, which is both
+# deterministic across environments and fair to the specification.
+LOG_STARTS_C = [[20, 1e-19, 1, 1.5], [50, 1e-20, 1, 1.0], [10, 1e-18, .5, 1.8],
+                [100, 1e-21, 10, .8], [45, 4e-11, 1, .6], [5, 1e-17, 1, 2.0],
+                [30, 1e-13, .25, .7], [15, 1e-16, 2, 1.2]]
+LOG_STARTS_N = [[20, 1e-6, 10, 1.5], [50, 1e-7, 1, 1.0], [10, 1e-5, .5, 1.8],
+                [80, 1e-8, 100, .8], [30, 1e-6, .25, .7], [15, 1e-4, 2, 1.2]]
+
+def fit_log_multistart(x, y, bounds, starts):
+    best = (np.inf, None)
+    for p0 in starts:
+        try:
+            p, _ = curve_fit(f_log, x, y, p0=p0, bounds=bounds, maxfev=800000)
+        except Exception:
+            continue
+        rss = float(np.sum((y - f_log(x, *p)) ** 2))
+        if rss < best[0]:
+            best = (rss, p)
+    if best[1] is None:
+        raise RuntimeError("log fit failed from every start")
+    return best[1]
+
+def compare_forms(x, y, p0p, p0l, bndl, log_starts):
     pp, _ = curve_fit(f_pow, x, y, p0=p0p, maxfev=800000)
-    pl, _ = curve_fit(f_log, x, y, p0=p0l, bounds=bndl, maxfev=800000)
+    pl = fit_log_multistart(x, y, bndl, log_starts)
     return dict(
         n=int(len(x)),
         power=dict(**gof(f_pow, pp, x, y, 3), LOOCV=loocv(f_pow, p0p, None, x, y),
                    params=[float(v) for v in pp]),
-        log=dict(**gof(f_log, pl, x, y, 4), LOOCV=loocv(f_log, p0l, bndl, x, y),
+        log=dict(**gof(f_log, pl, x, y, 4), LOOCV=loocv(f_log, p0l, bndl, x, y, log_starts),
                  params=[float(v) for v in pl]))
 
 # ----------------------------------------------------------------------
@@ -420,7 +453,7 @@ def main():
 
     # --- empirical validation: compute-matched envelope ----------------------
     envC, envL = envelope(C_all, L_all, nbands=15)   # full sample: outliers are high-loss
-    cmp_C = compare_forms(envC, envL, P0_POW_C, P0_LOG_C, BND_LOG_C)
+    cmp_C = compare_forms(envC, envL, P0_POW_C, P0_LOG_C, BND_LOG_C, LOG_STARTS_C)
     ppC = cmp_C["power"]["params"]
     gain_env = lambda c: (f_pow(c, *ppC) - f_pow(2 * c, *ppC)) / f_pow(c, *ppC)
     validation = {}
@@ -438,7 +471,7 @@ def main():
 
     # --- methodological finding: the wrong object hides the difference -------
     envN, envLN = envelope(N_all, L_all, nbands=15)
-    cmp_N = compare_forms(envN, envLN, P0_POW_N, P0_LOG_N, BND_LOG_N)
+    cmp_N = compare_forms(envN, envLN, P0_POW_N, P0_LOG_N, BND_LOG_N, LOG_STARTS_N)
 
     # --- correspondence between the elasticity hurdle and the monetary rule ---
     # For a fixed price and loss function, each hurdle selects a scale; evaluating
@@ -459,7 +492,7 @@ def main():
     for nb in [10, 12, 15, 20, 25]:
         try:
             eC, eL = envelope(C_all, L_all, nbands=nb)
-            cmp_nb = compare_forms(eC, eL, P0_POW_C, P0_LOG_C, BND_LOG_C)
+            cmp_nb = compare_forms(eC, eL, P0_POW_C, P0_LOG_C, BND_LOG_C, LOG_STARTS_C)
             pnb = cmp_nb["power"]["params"]
             g_nb = lambda c: ((f_pow(c, *pnb) - f_pow(2 * c, *pnb)) / f_pow(c, *pnb))
             c_emp4 = brentq(lambda c: g_nb(c) - 0.04, 1e15, 1e32)
