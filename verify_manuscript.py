@@ -229,6 +229,24 @@ def main(doc_path, results_path):
                 bool(re.search(r"overlap|also among the five highest-loss", text)),
                 f"rows {sc['n_row1']} and {sc['n_row2']}, overlap {sc['overlap_indices']}")
 
+
+    # ---------- figures must carry the same numbers as the text ----------
+    # Text can be corrected while an image keeps a superseded value; that is how a
+    # stale LOOCV survived two revisions. The embedded PNGs are checked for the
+    # metrics they print by extracting them from the docx and reading the legend
+    # region is out of scope here, so instead we assert that the figure files on
+    # disk are newer than the results file they must reflect.
+    import os
+    figdir = os.path.join(os.path.dirname(results_path) or ".", "..", "figures")
+    figdir = os.path.normpath(figdir)
+    if os.path.isdir(figdir):
+        rts = os.path.getmtime(results_path)
+        stale = [f for f in os.listdir(figdir) if f.endswith(".png")
+                 and os.path.getmtime(os.path.join(figdir, f)) < rts - 60]
+        rep.add("FIGURE", "figures newer than results", not stale,
+                "all regenerated after the last results run" if not stale
+                else f"older than results.json: {stale}")
+
     n_bad = rep.show()
     if n_bad:
         print("\nThe manuscript does not agree with the pipeline. Fix the FAIL rows above.")

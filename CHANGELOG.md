@@ -1,5 +1,18 @@
 # Changelog
 
+## v4.5.1 — figures regenerated from the corrected fit; figure check in the verifier
+
+- Figure 5 still printed the pre-multistart logarithmic fit (R2 0.826, LOOCV 0.155)
+  while the text carried the corrected values (0.969, 0.107). All figures are
+  regenerated from the current results file, and the stale ones are replaced.
+- `verify_manuscript.py` gains a FIGURE check: every PNG in `figures/` must be
+  newer than `results/results.json`. Numeric checks read the text and cannot see
+  what an image prints, which is how a superseded value survived two revisions.
+- Note for anyone updating a clone: copying a packaged `figures/` directory over a
+  local one will overwrite figures that a local pipeline run had just produced
+  correctly. Re-run the pipeline after any such copy, or check the FIGURE row.
+
+
 ## v4.5.0 — deterministic multistart for the logarithmic fit
 
 **The reported fit of the alternative specification was optimizer-dependent, and
